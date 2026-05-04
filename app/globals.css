@@ -1,26 +1,79 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --brand-navbar: #0b0f1a;
+  --brand-navbar-text: #f0ede6;
+  --brand-navbar-muted: #8a90a8;
+  --brand-gold: #c28822;
+  --brand-gold-light: #d4a843;
+  --brand-card: #ffffff;
+  --brand-border: #e2e8f0;
+  --brand-muted: #64748b;
+  --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f8fafc 100%);
+  --brand-gold-gradient: linear-gradient(135deg, #d4a843, #c28822);
+}
+
+.dark {
+  --background: #0b0f1a;
+  --foreground: #f0ede6;
+  --brand-navbar: #0b0f1a;
+  --brand-navbar-text: #f0ede6;
+  --brand-navbar-muted: #8a90a8;
+  --brand-gold: #d4a843;
+  --brand-gold-light: #e8c36a;
+  --brand-card: #1a2038;
+  --brand-border: #2a3050;
+  --brand-muted: #8a90a8;
+  --bg-gradient: linear-gradient(135deg, #0b0f1a 0%, #141a2e 50%, #0b0f1a 100%);
+  --brand-gold-gradient: linear-gradient(135deg, #d4a843, #e8c36a);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-brand-navbar: var(--brand-navbar);
+  --color-brand-navbar-text: var(--brand-navbar-text);
+  --color-brand-navbar-muted: var(--brand-navbar-muted);
+  --color-brand-gold: var(--brand-gold);
+  --color-brand-gold-light: var(--brand-gold-light);
+  --color-brand-card: var(--brand-card);
+  --color-brand-border: var(--brand-border);
+  --color-brand-muted: var(--brand-muted);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--brand-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-gold);
+}
+
+/* Animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
 }
