@@ -258,62 +258,71 @@ function ConfigureForm() {
               className="w-full max-w-lg bg-white shadow-xl rounded-xl overflow-hidden text-black"
               style={{ fontFamily: "'EB Garamond', 'Garamond', 'Calibri', Georgia, serif", fontSize: '13px', lineHeight: '1.7' }}
             >
-              <div className="p-8">
-                {/* School Name */}
-                <div className="text-center border-b-2 border-black pb-4 mb-4">
+              <div className="p-8" style={{ fontFamily: "'Calibri', Arial, sans-serif" }}>
+                {/* School Name & Info */}
+                <div className="text-center mb-5">
                   <input
                     type="text"
                     name="schoolName"
                     value={formData.schoolName}
                     onChange={handleChange}
-                    placeholder="Click here to enter School / Institute Name"
-                    className="w-full text-center text-lg font-bold bg-transparent border-0 focus:outline-none focus:border-b-2 focus:border-gray-400 placeholder:text-gray-300 placeholder:text-sm transition-all"
-                    style={{ fontFamily: "'EB Garamond', 'Garamond', 'Calibri', Georgia, serif" }}
+                    placeholder="SCHOOL / INSTITUTE NAME"
+                    className="w-full text-center text-[22px] font-extrabold bg-transparent border-0 focus:outline-none focus:border-b-2 focus:border-gray-400 placeholder:text-gray-300 transition-all text-gray-900"
                   />
-                  <div className="flex justify-center items-center gap-1 mt-1 text-sm font-semibold">
+                  <div className="mt-2 text-[15px] font-bold text-gray-800 text-center">
                     <input
                       type="text"
                       name="examName"
                       value={formData.examName}
                       onChange={handleChange}
-                      placeholder="Exam Name"
-                      className="text-center bg-transparent border-0 focus:outline-none focus:border-b focus:border-gray-400 placeholder:text-gray-300 placeholder:text-xs min-w-[80px] max-w-[160px] transition-all"
-                      style={{ fontFamily: "'EB Garamond', 'Garamond', 'Calibri', Georgia, serif", width: `${Math.max(80, formData.examName.length * 9)}px` }}
+                      placeholder="Examination"
+                      className="text-right bg-transparent border-0 focus:outline-none focus:border-b focus:border-gray-400 placeholder:text-gray-300 transition-all inline-block"
+                      style={{ width: `${Math.max(40, (formData.examName.length || 11) * 8.5)}px` }}
                     />
-                    <span className="text-gray-600 whitespace-nowrap">— {board.name}</span>
+                    <span className="mx-1">:</span>
+                    <input
+                      type="date"
+                      name="examDate"
+                      value={formData.examDate}
+                      onChange={handleChange}
+                      className="bg-transparent border-0 focus:outline-none text-gray-800 cursor-pointer inline-block"
+                      style={{ width: '110px' }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[14px] font-bold text-gray-800">
+                    Class- {formData.class_grade}
+                  </div>
+                  <div className="mt-1 text-[14px] font-bold text-gray-800">
+                    Subject : {formData.subject}
+                  </div>
+                  <div className="mt-1 text-[13px] font-semibold text-gray-600">
+                    Topic : {formData.topic}
                   </div>
                 </div>
 
-                {/* Meta Row */}
-                <div className="flex justify-between text-xs font-semibold mb-6 pb-2 border-b border-gray-200" style={{ fontFamily: "'Calibri', 'EB Garamond', Arial, sans-serif" }}>
-                  <div className="space-y-0.5">
-                    <div>Subject: <span className="font-normal text-gray-600">{formData.subject}</span></div>
-                    <div>Class: <span className="font-normal text-gray-600">{formData.class_grade}</span></div>
-                    <div className="max-w-[140px] truncate">Topic: <span className="font-normal text-gray-600">{formData.topic}</span></div>
-                  </div>
-                  <div className="space-y-0.5 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <span>Date:</span>
-                      <input
-                        type="date"
-                        name="examDate"
-                        value={formData.examDate}
-                        onChange={handleChange}
-                        className="bg-transparent border-0 focus:outline-none text-gray-600 text-xs w-[100px] cursor-pointer"
-                      />
-                    </div>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>Duration:</span>
-                      <input
-                        type="text"
-                        name="examDuration"
-                        value={formData.examDuration}
-                        onChange={handleChange}
-                        className="bg-transparent border-0 focus:outline-none text-gray-600 text-xs text-right w-[70px]"
-                      />
-                    </div>
-                    <div>Max Marks: <span className="font-normal text-gray-600">{formData.totalMarks}</span></div>
-                  </div>
+                {/* Time & Marks Row */}
+                <table className="w-full text-[14px] font-bold text-gray-900 mb-5 border-collapse">
+                  <tbody>
+                    <tr>
+                      <td className="text-left p-0">
+                        <div className="flex items-center">
+                          <span>Time :</span>
+                          <input
+                            type="text"
+                            name="examDuration"
+                            value={formData.examDuration}
+                            onChange={handleChange}
+                            className="bg-transparent border-0 focus:outline-none text-gray-900 ml-1 w-[60px]"
+                          />
+                        </div>
+                      </td>
+                      <td className="text-right p-0">M.M.: {formData.totalMarks}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div className="text-[13px] font-bold text-gray-900 mb-4 text-left">
+                  Note:- All questions are compulsory.
                 </div>
 
                 {/* Skeleton Content */}

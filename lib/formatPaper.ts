@@ -8,12 +8,22 @@ export const formatPaper = (rawText: string, config: PromptConfig): string => {
   const fontSans = `'Calibri', 'Arial', sans-serif`;
 
   // Guaranteed Header
-  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;text-align:center;margin-bottom:32px;padding-bottom:20px;border-bottom:3px double #1f2937;">`);
-  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:32px;font-weight:800;font-family:${fontSerif};color:#111827;letter-spacing:0.5px;margin-bottom:8px;">${config.schoolName || 'SCHOOL / INSTITUTE NAME'}</div>`);
-  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:24px;font-weight:700;font-family:${fontSerif};color:#1f2937;margin-bottom:16px;">${config.examName || 'UNIT TEST'} — ${config.board}</div>`);
-  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:16px;font-weight:600;font-family:${fontSans};color:#374151;margin-bottom:8px;">Subject: ${config.subject} &nbsp;|&nbsp; Class: ${config.class_grade} &nbsp;|&nbsp; Topic: ${config.topic}</div>`);
-  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:16px;font-weight:600;font-family:${fontSans};color:#374151;">Date: ${config.examDate || '_____________'} &nbsp;|&nbsp; Time Allowed: ${config.examDuration || '2 Hours'} &nbsp;|&nbsp; Max. Marks: ${config.totalMarks}</div>`);
+  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;text-align:center;margin-bottom:20px;">`);
+  result.push(`  <div style="font-size:28px;font-weight:800;font-family:${fontSans};color:#111827;margin-bottom:12px;">${config.schoolName || 'SCHOOL / INSTITUTE NAME'}</div>`);
+  result.push(`  <div style="font-size:20px;font-weight:700;font-family:${fontSans};color:#1f2937;margin-bottom:4px;">${config.examName || 'Examination'} : ${config.examDate || '_____________'}</div>`);
+  result.push(`  <div style="font-size:18px;font-weight:700;font-family:${fontSans};color:#1f2937;margin-bottom:4px;">Class- ${config.class_grade}</div>`);
+  result.push(`  <div style="font-size:18px;font-weight:700;font-family:${fontSans};color:#1f2937;margin-bottom:4px;">Subject : ${config.subject}</div>`);
+  result.push(`  <div style="font-size:16px;font-weight:600;font-family:${fontSans};color:#374151;margin-bottom:20px;">Topic : ${config.topic}</div>`);
   result.push(`</div>`);
+  
+  result.push(`<table width="100%" style="margin-bottom:24px;border-collapse:collapse;font-size:18px;font-weight:700;font-family:${fontSans};color:#111827;">`);
+  result.push(`  <tr>`);
+  result.push(`    <td style="text-align:left;padding:0;">Time : ${config.examDuration || '3 Hrs.'}</td>`);
+  result.push(`    <td style="text-align:right;padding:0;">M.M.: ${config.totalMarks || '100'}</td>`);
+  result.push(`  </tr>`);
+  result.push(`</table>`);
+
+  result.push(`<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:18px;font-weight:700;font-family:${fontSans};color:#111827;text-align:left;margin-bottom:24px;">Note:- All questions are compulsory.</div>`);
 
   let i = 0;
   // Skip any AI-generated headers if it accidentally generated them before General Instructions
@@ -21,12 +31,23 @@ export const formatPaper = (rawText: string, config: PromptConfig): string => {
     i++;
   }
 
+  let beforeFirstQuestion = true;
+
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
 
     if (!trimmed) {
       result.push('<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;height:12px;"></div>');
+      i++;
+      continue;
+    }
+
+    if (/^SECTION\s+[A-Z]/i.test(trimmed) || /^(Q\.?\s*)?\d+[\.\)]\s+\S/.test(trimmed)) {
+      beforeFirstQuestion = false;
+    }
+
+    if (beforeFirstQuestion && (/compulsory/i.test(trimmed) || /all questions/i.test(trimmed))) {
       i++;
       continue;
     }
