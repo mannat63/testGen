@@ -20,15 +20,15 @@ export async function POST(req: Request) {
 
     const prompt = generateTestPrompt(config);
 
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.7,
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.7,
       max_tokens: 4000,
       top_p: 1,
     });
