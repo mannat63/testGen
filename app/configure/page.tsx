@@ -101,19 +101,21 @@ function ConfigureForm() {
     <div className="min-h-[100dvh] lg:h-screen w-full overflow-x-hidden lg:overflow-hidden flex flex-col transition-colors duration-300" style={{ background: 'var(--bg-gradient)' }}>
       
       {/* Navbar */}
-      <nav className="flex items-center justify-between px-6 md:px-12 py-3 border-b border-[#2a3050] bg-brand-navbar shrink-0">
-        <div className="flex items-center space-x-6">
-          <Link href="/" className="flex items-center space-x-3">
+      <nav className="flex items-center justify-between px-4 sm:px-6 md:px-12 py-3 border-b border-[#2a3050] bg-brand-navbar shrink-0">
+        <div className="flex items-center space-x-3 sm:space-x-6">
+          <Link href="/" className="flex items-center text-brand-navbar-muted hover:text-brand-gold-light transition-colors" title="Change Board">
+            <ArrowLeft className="h-5 w-5 sm:mr-2 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline text-sm">Change Board</span>
+          </Link>
+
+          <div className="flex items-center space-x-2 sm:space-x-3 pointer-events-none">
             <div className="bg-[#1a2038] p-1 rounded-md border border-[#2a3050] flex items-center justify-center shadow-sm">
-              <Image src="/image.png" alt="Logo" width={24} height={24} className="rounded-sm" />
+              <Image src="/image.png" alt="Logo" width={20} height={20} className="rounded-sm sm:w-[24px] sm:h-[24px]" />
             </div>
-            <span className="text-lg font-bold tracking-widest">
+            <span className="text-base sm:text-lg font-bold tracking-widest">
               <span className="text-white">INTEL</span><span className="text-brand-gold-light">LOGY</span>
             </span>
-          </Link>
-          <Link href="/" className="hidden sm:flex items-center text-sm text-brand-navbar-muted hover:text-brand-gold-light transition-colors">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Change Board
-          </Link>
+          </div>
         </div>
         <ThemeToggle />
       </nav>

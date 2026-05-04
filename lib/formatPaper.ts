@@ -114,6 +114,15 @@ export const formatPaper = (rawText: string, config: PromptConfig): string => {
       continue;
     }
 
+    // ── END OF PAPER marker ──
+    if (/^-+\s*END OF PAPER\s*-+/i.test(trimmed)) {
+      result.push(
+        `<div class="pdf-no-break" style="page-break-inside: avoid; break-inside: avoid;font-size:16px;font-weight:bold;font-family:${fontSans};color:#4b5563;margin:32px 0 24px 0;text-align:center;letter-spacing:2px;">--- END OF PAPER ---</div>`
+      );
+      i++;
+      continue;
+    }
+
     // ── DEFAULT: any other line ──
     // Allow minimal bolding here.
     const styled = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
