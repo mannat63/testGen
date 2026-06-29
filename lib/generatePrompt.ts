@@ -1,193 +1,100 @@
+import { PaperPlan, QuestionSlot } from './paperAlgorithm';
+
+export interface SourceMix {
+  questionBank: number;
+  coaching: number;
+  ai: number;
+}
+
 export interface PromptConfig {
   board: string;
   class_grade: string;
   subject: string;
-  topic: string;
-  difficulty: string;
-  questionTypes: string;
-  totalMarks: string | number;
-  numQuestions: string | number;
+  chapters: { chapterId: string; chapterName: string; weightage: number }[];
+  sections: {
+    name: string;
+    questionTypes: { type: string; label: string; marksEach: number; count: number; negativeMarking?: number }[];
+  }[];
+  difficulty: { easy: number; medium: number; hard: number };
+  totalMarks: number;
+  duration: number;
   language: string;
   schoolName: string;
   examName: string;
   examDate: string;
   examDuration: string;
-  year?: string;
+  numSets: number;
+  setLabel?: string;
+  sourceMix?: SourceMix;
 }
 
-export const generateTestPrompt = ({
-  board, class_grade, subject, topic, difficulty, questionTypes, totalMarks, numQuestions, language,
-}: PromptConfig) => {
+const TYPE_SHORT: Record<string, string> = {
+  mcq: 'MCQ',
+  sa1: 'SA',
+  sa2: 'SA',
+  la: 'LA',
+  numerical: 'NUM',
+  case_study: 'CASE',
+  assertion_reason: 'AR',
+};
 
-  const total = Number(numQuestions);
-  const marks = Number(totalMarks);
+export const TOKEN_BUDGET: Record<string, number> = {
+  mcq: 110,
+  sa1: 55,
+  sa2: 70,
+  la: 180,
+  numerical: 70,
+  case_study: 280,
+  assertion_reason: 130,
+};
 
-  // Calculate balanced section distribution with exact math
-  let sectionPlan = '';
-  let grandTotalLine = '';
-  let sectionAHeader = '';
-  let sectionBHeader = '';
-  let sectionCHeader = '';
+/**
+ * Build prompt for only the AI-needed slots.
+ * `aiSlotIndices` tells which slots in the plan need LLM generation.
+ * The LLM output uses Q1, Q2... numbering matching the order of aiSlotIndices.
+ */
+export function generateTestPrompt(
+  config: PromptConfig,
+  plan: PaperPlan,
+  aiSlotIndices?: number[],
+): string {
+  const allSlots: QuestionSlot[] = plan.sections.flatMap(s => s.slots);
 
-  let mcqCount = 0;
-  let shortCount = 0;
-  let longCount = 0;
+  const slotsToGenerate = aiSlotIndices
+    ? aiSlotIndices.map(i => allSlots[i])
+    : allSlots;
 
-  const isMCQOnly = questionTypes.toLowerCase().includes('mcq') || questionTypes.toLowerCase().includes('multiple choice');
-  const isLongOnly = questionTypes.toLowerCase().includes('long');
-  const isShortOnly = questionTypes.toLowerCase().includes('short');
+  if (slotsToGenerate.length === 0) return '';
 
-  if (isMCQOnly) {
-    mcqCount = total;
-    const perQ = Math.floor(marks / total);
-    const actualTotal = perQ * total;
-    sectionAHeader = `SECTION A — MCQ (${total} questions × ${perQ} mark each = ${actualTotal} marks)`;
-    sectionPlan = sectionAHeader;
-    grandTotalLine = `Grand Total: Section A (${total} × ${perQ}) = ${actualTotal} marks`;
-  } else if (isLongOnly) {
-    longCount = total;
-    const perQ = Math.floor(marks / total);
-    const actualTotal = perQ * total;
-    sectionAHeader = `SECTION A — Long Answer (${total} questions × ${perQ} marks each = ${actualTotal} marks)`;
-    sectionPlan = sectionAHeader;
-    grandTotalLine = `Grand Total: Section A (${total} × ${perQ}) = ${actualTotal} marks`;
-  } else if (isShortOnly) {
-    shortCount = total;
-    const perQ = Math.floor(marks / total);
-    const actualTotal = perQ * total;
-    sectionAHeader = `SECTION A — Short Answer (${total} questions × ${perQ} marks each = ${actualTotal} marks)`;
-    sectionPlan = sectionAHeader;
-    grandTotalLine = `Grand Total: Section A (${total} × ${perQ}) = ${actualTotal} marks`;
-  } else {
-    // Mixed: Better algorithm to distribute marks based on weightings
-    mcqCount = Math.max(1, Math.round(total * 0.40));
-    shortCount = Math.max(1, Math.round(total * 0.35));
-    longCount = total - mcqCount - shortCount;
+  const uniqueChapters = [...new Set(slotsToGenerate.map(sl => sl.chapterName))];
+  const chapterMap: Record<string, string> = {};
+  uniqueChapters.forEach((ch, i) => { chapterMap[ch] = `C${i + 1}`; });
+  const chapterIndex = uniqueChapters.map((ch, i) => `C${i + 1}=${ch}`).join('; ');
 
-    // Fix counts if total < 3 or longCount < 1
-    if (longCount < 1 && total >= 3) {
-      longCount = 1;
-      if (shortCount > 1) shortCount--;
-      else mcqCount--;
-    } else if (total === 2) {
-      mcqCount = 1; shortCount = 1; longCount = 0;
-    } else if (total === 1) {
-      mcqCount = 1; shortCount = 0; longCount = 0;
-    }
+  let qList = '';
+  slotsToGenerate.forEach((slot, i) => {
+    const cKey = chapterMap[slot.chapterName] || 'C1';
+    const type = TYPE_SHORT[slot.questionType] || slot.questionType.toUpperCase();
+    const diff = slot.difficulty[0].toUpperCase();
+    qList += `Q${i + 1}. ${type}[${cKey},${diff}]\n`;
+  });
 
-    const mcqMarks = mcqCount; // always 1 mark each
-    let remainingMarks = marks - mcqMarks;
-    
-    let shortPerQ = 1;
-    let longPerQ = 1;
+  const classText = config.class_grade.toLowerCase().startsWith('class') ? config.class_grade : `Class ${config.class_grade}`;
+  return `${config.board} ${config.subject} ${classText} question paper setter.
+Write ONLY question text. No marks, no answers, no section headers.
 
-    if (remainingMarks > 0 && (shortCount > 0 || longCount > 0)) {
-      const weight = (shortCount * 2) + (longCount * 4);
-      const ratio = weight > 0 ? remainingMarks / weight : 0;
-      
-      shortPerQ = Math.max(1, Math.round(2 * ratio));
-      longPerQ = Math.max(1, Math.round(4 * ratio));
+Types: MCQ=question+(a)(b)(c)(d) | SA=short answer | LA=long answer | NUM=numerical with units | AR=Assertion+Reason+(a)(b)(c)(d) | CASE=passage+sub-questions
 
-      // Prevent overshoot
-      while ((shortCount * shortPerQ) + (longCount * longPerQ) > remainingMarks) {
-        if (longPerQ > shortPerQ && longPerQ > 1) {
-          longPerQ--;
-        } else if (shortPerQ > 1) {
-          shortPerQ--;
-        } else if (longPerQ > 1) {
-          longPerQ--;
-        } else {
-          break;
-        }
-      }
-    }
+Chapters: ${chapterIndex}
+Difficulty: E=easy M=medium H=hard
 
-    const actualShortTotal = shortPerQ * shortCount;
-    const actualLongTotal = longPerQ * longCount;
-
-    // Handle any leftover marks (add to last long question)
-    const leftover = Math.max(0, marks - (mcqMarks + actualShortTotal + actualLongTotal));
-
-    sectionAHeader = `SECTION A — MCQ (${mcqCount} questions × 1 mark each = ${mcqMarks} marks)`;
-    if (shortCount > 0) {
-      sectionBHeader = `SECTION B — Short Answer (${shortCount} questions × ${shortPerQ} marks each = ${actualShortTotal} marks)`;
-    }
-    if (longCount > 0) {
-      sectionCHeader = `SECTION C — Long Answer (${longCount} questions × ${longPerQ} marks each = ${actualLongTotal}${leftover > 0 ? ` + ${leftover} bonus mark on last question` : ''} marks)`;
-    }
-
-    const verifiedTotal = mcqMarks + actualShortTotal + actualLongTotal + leftover;
-
-    sectionPlan = `${sectionAHeader}
-${sectionBHeader}
-${sectionCHeader}
-VERIFIED TOTAL: ${mcqCount}×1 + ${shortCount}×${shortPerQ} + ${longCount}×${longPerQ}${leftover > 0 ? `+${leftover}` : ''} = ${verifiedTotal} marks
-
-EACH QUESTION MARK VALUE:
-- Section A questions: 1 mark
-${shortCount > 0 ? `- Section B questions: ${shortPerQ} marks` : ''}
-${longCount > 0 ? `- Section C questions: ${longPerQ} marks${leftover > 0 ? ` (last one: ${longPerQ + leftover} marks)` : ''}` : ''}`;
-
-    grandTotalLine = `Grand Total Verification:
-Part A: ${mcqCount} × 1 = ${mcqMarks} marks
-${shortCount > 0 ? `Part B: ${shortCount} × ${shortPerQ} = ${actualShortTotal} marks` : ''}
-${longCount > 0 ? `Part C: ${longCount} × ${longPerQ} = ${actualLongTotal}${leftover > 0 ? ` (+${leftover} on last question)` : ''} marks` : ''}
-TOTAL: ${mcqMarks} + ${actualShortTotal} + ${actualLongTotal + leftover} = ${verifiedTotal} marks`;
-  }
-
-return `You are an expert ${board} question paper setter and academic evaluator.
-Your task is to generate a highly accurate, board-level exam for Class ${class_grade} ${subject}.
-
-STRICT EXAM CONFIGURATION:
-- Board/Exam: ${board}
-- Topic/Chapter: ${topic}
-- Difficulty Level: ${difficulty} (Ensure questions strictly align with this complexity level)
-- Question Types: ${questionTypes}
-- Total Questions: ${total}
-- Total Marks: ${marks}
-- Language: ${language}
-
-MANDATORY SECTION BREAKDOWN — FOLLOW EXACTLY:
-${sectionPlan}
-
-CRITICAL INSTRUCTIONS FOR QUALITY & ACCURACY:
-1. Questions MUST BE conceptually sound, error-free, and appropriate for ${difficulty} difficulty.
-2. For "Hard" difficulty, emphasize application-based, analytical, and higher-order thinking (HOTS) questions.
-3. For "Easy" or "Medium" difficulty, focus on core concepts, standard applications, and fundamental understanding.
-4. STRICTLY adhere to the section breakdown and mark allocation. Do NOT hallucinate different marks.
-5. Questions must be numbered CONTINUOUSLY across all sections (1, 2, 3... until ${total}). Do NOT restart numbering at Section B or C.
-6. NO out-of-syllabus questions. Focus only on: ${topic}.
-7. ALL answers must be provided ONLY in the ANSWER KEY section at the end. DO NOT include answers immediately after the questions.
-8. MCQ OPTIONS: Provide 4 options. Each option MUST be on its own separate line (e.g. (a) ... \\n (b) ...).
-9. MARKS: Show marks ONLY ONCE at the END of each question like this: [1 mark] or [3 marks].
-
-OUTPUT FORMAT (plain text ONLY, no HTML, no markdown):
-
-General Instructions:
-1. Marks are indicated against each question.
-2. All the best for exam.
-
-${sectionAHeader || 'SECTION A'}
-
-1. Question text here? [1 mark]
-(a) First option
-(b) Second option
-(c) Third option
-(d) Fourth option
-
-${sectionBHeader ? `\n${sectionBHeader}\n\n${mcqCount + 1}. Question text? [X marks]\n` : ''}
-${sectionCHeader ? `\n${sectionCHeader}\n\n${mcqCount + shortCount + 1}. Question text? [X marks]\n` : ''}
-[Numbered continuing sequentially. Each option on a new line for MCQs.]
-
---- END OF PAPER ---
-
-${grandTotalLine}
-
-ANSWER KEY
-
-Q1. (b) Correct answer
-Q2. (a) Correct answer
-Q3. Full written answer...
-
-Generate now. Be accurate, educational, and strict about the mark distribution. Output plain text only. Start directly from General Instructions.`;
+Please generate ALL ${slotsToGenerate.length} questions listed below:
+${qList}
+Rules:
+- Begin with Q1. exactly. No preamble.
+- You MUST generate all ${slotsToGenerate.length} questions. Do not stop early.
+- MCQ/AR: options on new lines labelled (a)(b)(c)(d)
+- Match specified chapter and difficulty
+- ${config.board}-standard exam quality
+- NO answers, NO answer keys, NO marks`;
 }
