@@ -8,5 +8,11 @@ const CommonDBSchema = new mongoose.Schema({}, {
 
 export async function getCommonDBModel(): Promise<mongoose.Model<any>> {
   await dbConnect();
-  return mongoose.models.CommonDB || mongoose.model('CommonDB', CommonDBSchema, 'question_bank');
+  if (mongoose.models.CommonDB) {
+    delete (mongoose.models as any).CommonDB;
+  }
+  if (mongoose.connection.models.CommonDB) {
+    delete (mongoose.connection.models as any).CommonDB;
+  }
+  return mongoose.model('CommonDB', CommonDBSchema, 'question_bank');
 }
