@@ -291,7 +291,7 @@ function ConfigureForm() {
   };
 
   const updateSectionName = (sIdx: number, name: string) => {
-    setCustomSections(prev => {
+    setCustomSections((prev: any) => {
       const next = JSON.parse(JSON.stringify(prev));
       next[sIdx].name = name;
       return next;
@@ -302,7 +302,7 @@ function ConfigureForm() {
     const others = (['easy', 'medium', 'hard'] as const).filter(k => k !== key);
     const remaining = 100 - val;
     const otherTotal = diffDist[others[0]] + diffDist[others[1]];
-    setDiffDist(prev => {
+    setDiffDist((prev: any) => {
       const next = { ...prev, [key]: val };
       if (otherTotal > 0) {
         next[others[0]] = Math.round((prev[others[0]] / otherTotal) * remaining);
@@ -319,7 +319,7 @@ function ConfigureForm() {
     const others = (['questionBank', 'coaching', 'ai'] as const).filter(k => k !== key);
     const remaining = 100 - val;
     const otherTotal = sourceMix[others[0]] + sourceMix[others[1]];
-    setSourceMix(prev => {
+    setSourceMix((prev: any) => {
       const next = { ...prev, [key]: val };
       if (otherTotal > 0) {
         next[others[0]] = Math.round((prev[others[0]] / otherTotal) * remaining);

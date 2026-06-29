@@ -31,10 +31,10 @@ GenerationLogSchema.index({ userEmail: 1, generatedAt: -1 });
 export async function getGenerationLogModel(): Promise<mongoose.Model<any>> {
   await dbConnect();
   if (mongoose.models.GenerationLog) {
-    delete mongoose.models.GenerationLog;
+    delete (mongoose.models as any).GenerationLog;
   }
   if (mongoose.connection.models.GenerationLog) {
-    delete mongoose.connection.models.GenerationLog;
+    delete (mongoose.connection.models as any).GenerationLog;
   }
   return mongoose.model('GenerationLog', GenerationLogSchema, 'generationlogs_testgen');
 }
