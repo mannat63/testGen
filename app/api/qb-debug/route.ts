@@ -1,15 +1,51 @@
 import { NextResponse } from 'next/server';
-import { getQuestionBankModel } from '@/models/QuestionBank';
+import mongoose from 'mongoose';
+import dbConnect from '@/lib/mongodb';
 
-// Diagnostic endpoint — shows first 3 raw documents from question_bank
-// Hit GET /api/qb-debug to see what field names your DB uses
-// DELETE THIS FILE once you've verified the field structure
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const QBModel = await getQuestionBankModel();
-    const total = await QBModel.countDocuments();
-    const samples = await QBModel.find({}).limit(3).lean();
-    return NextResponse.json({ total, samples });
+    await dbConnect();
+    const db = mongoose.connection.db;
+    if (!db) return NextResponse.json({ error: 'No DB connection' }, { status: 500 });
+
+    // List ALL collections so we can find the right name
+    const collections = await db.listCollections().toArray();
+    const collectionNames = collections.map(c => c.name).sort();
+
+    const { searchParams } = new URL(req.url);
+    const collName = searchParams.get('collection');
+    const board = searchParams.get('board');
+    const subject = searchParams.get('subject');
+
+    let result: any = { database: db.databaseName, collections: collectionNames };
+
+    if (collName) {
+      const coll = db.collection(collName);
+      const total = await coll.countDocuments();
+      const filter: any = {};
+      if (board) filter.board = { $regex: `^${board}$`, $options: 'i' };
+      if (subject) filter.subject = { $regex: subject, $options: 'i' };
+
+      const filteredCount = (board || subject) ? await coll.countDocuments(filter) : total;
+      const samples = await coll.find(filter).limit(3).toArray();
+      const fieldNames = samples.length > 0 ? Object.keys(samples[0]) : [];
+
+      const typeCounts = await coll.aggregate([
+        ...(Object.keys(filter).length > 0 ? [{ $match: filter }] : []),
+        { $group: { _id: '$question_type', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]).toArray();
+
+      const chapterCounts = await coll.aggregate([
+        ...(Object.keys(filter).length > 0 ? [{ $match: filter }] : []),
+        { $group: { _id: '$chapter', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]).toArray();
+
+      result = { ...result, collection: collName, total, filteredCount, fieldNames, typeCounts, chapterCounts, samples };
+    }
+
+    return NextResponse.json(result);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

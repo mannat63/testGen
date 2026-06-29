@@ -4,15 +4,66 @@ import { currentUser } from '@clerk/nextjs/server';
 import { generateTestPrompt, PromptConfig, TOKEN_BUDGET } from '@/lib/generatePrompt';
 import { parseQuestions, buildPaperHtml } from '@/lib/formatPaper';
 import { buildPaperPlan, generateSetVariants, ChapterSelection } from '@/lib/paperAlgorithm';
-import { sourceQuestions, SourcedQuestion } from '@/lib/questionSource';
+import { sourceQuestions, fetchReferenceQuestions, SourcedQuestion } from '@/lib/questionSource';
 import { PaperSection } from '@/config/examPatterns';
 import { getGenerationLogModel } from '@/models/GenerationLog';
 
-export const maxDuration = 60;
+export const maxDuration = 180;
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY || 'dummy_key_for_build',
 });
+
+const CHUNK_SIZE = 8;
+const CHUNK_DELAY_MS = 12_000;
+
+async function generateChunk(
+  config: PromptConfig,
+  plan: any,
+  allSlots: any[],
+  chunkIndices: number[],
+  refs: Map<string, any[]> | undefined,
+): Promise<{ questions: string[]; tokensUsed: number }> {
+  const prompt = generateTestPrompt(config, plan, chunkIndices, refs);
+  const aiSlots = chunkIndices.map(i => allSlots[i]);
+  const estimatedOutput = aiSlots.reduce(
+    (sum, slot) => sum + (TOKEN_BUDGET[slot.questionType] ?? 100), 0,
+  );
+  const max_tokens = Math.min(Math.max(estimatedOutput + 150, 500), 3000);
+
+  let retries = 0;
+  while (retries < 3) {
+    try {
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.7,
+        max_tokens,
+        top_p: 1,
+      });
+      const raw = completion.choices[0]?.message?.content || '';
+      const tokensUsed = completion.usage?.total_tokens || 0;
+      return { questions: parseQuestions(raw, chunkIndices.length), tokensUsed };
+    } catch (err: any) {
+      const status = err?.status;
+      const code = err?.error?.code || err?.error?.error?.code;
+      const isRateLimit = status === 429 || status === 413 || code === 'rate_limit_exceeded';
+
+      if (isRateLimit) {
+        retries++;
+        if (retries >= 3) break;
+        const waitSec = status === 413 ? 10_000 : 15_000 * retries;
+        console.log(`[AI] Rate limited (${status}), waiting ${waitSec / 1000}s before retry ${retries}/3`);
+        await new Promise(r => setTimeout(r, waitSec));
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  const fallback = '[Question could not be generated. Please add manually.]';
+  return { questions: new Array(chunkIndices.length).fill(fallback), tokensUsed: 0 };
+}
 
 export async function POST(req: Request) {
   try {
@@ -27,9 +78,8 @@ export async function POST(req: Request) {
     const sections = config.sections as PaperSection[];
     const difficulty = config.difficulty || { easy: 30, medium: 50, hard: 20 };
     const numSets = config.numSets || 1;
-    const sourceMix = config.sourceMix || { questionBank: 0, coaching: 0, ai: 100 };
+    const sourceMix = config.sourceMix || { questionBank: 70, coaching: 0, ai: 30 };
 
-    // 1. Algorithm builds the complete plan
     const basePlan = buildPaperPlan(chapterSelections, sections, difficulty);
     config.totalMarks = basePlan.totalMarks;
 
@@ -38,10 +88,13 @@ export async function POST(req: Request) {
 
     let totalTokensUsed = 0;
 
-    // 2. Fetch questions from question bank and coaching material
-    const sourced = await sourceQuestions(basePlan, config.board, config.subject, sourceMix, (config as any).language || 'English');
+    // Fetch questions from common_db
+    const sourced = await sourceQuestions(
+      basePlan, config.board, config.subject, sourceMix,
+      (config as any).language || 'English',
+      config.class_grade,
+    );
 
-    // 3. Build final questions array and source tracking
     const finalQuestions: string[] = new Array(totalSlots).fill('');
     const finalSources: (SourcedQuestion['source'] | null)[] = new Array(totalSlots).fill(null);
     const aiNeededIndices: number[] = [];
@@ -56,60 +109,64 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Use LLM only for remaining unfilled slots
+    // Generate AI questions in chunks to stay within Groq TPM limits
     if (aiNeededIndices.length > 0) {
       if (!process.env.GROQ_API_KEY) {
         return NextResponse.json({ error: 'Groq API Key is not configured.' }, { status: 500 });
       }
 
-      const prompt = generateTestPrompt(config, basePlan, aiNeededIndices);
+      // Fetch reference questions (limited to 1 per chapter, max 3 total)
+      const aiChapters = [...new Set(aiNeededIndices.map(i => allSlots[i].chapterName))];
+      let referenceQuestions: Map<string, any[]> | undefined;
+      try {
+        referenceQuestions = await fetchReferenceQuestions(
+          config.board, config.subject, config.class_grade,
+          aiChapters.slice(0, 3), 1,
+        );
+      } catch { /* non-critical */ }
 
-      const aiSlots = aiNeededIndices.map(i => allSlots[i]);
-      const estimatedOutput = aiSlots.reduce(
-        (sum, slot) => sum + (TOKEN_BUDGET[slot.questionType] ?? 100),
-        0,
-      );
-      const max_tokens = Math.min(Math.max(estimatedOutput + 300, 1200), 5200);
+      // Split into chunks of CHUNK_SIZE questions
+      const chunks: number[][] = [];
+      for (let i = 0; i < aiNeededIndices.length; i += CHUNK_SIZE) {
+        chunks.push(aiNeededIndices.slice(i, i + CHUNK_SIZE));
+      }
 
-      let retries = 0;
-      let rawContent = '';
-      while (retries < 3) {
+      console.log(`[AI] Generating ${aiNeededIndices.length} questions in ${chunks.length} chunks of ≤${CHUNK_SIZE}`);
+
+      for (let c = 0; c < chunks.length; c++) {
+        const chunk = chunks[c];
+        // Only include reference questions for the first chunk
+        const refs = c === 0 ? referenceQuestions : undefined;
+
         try {
-          const chatCompletion = await groq.chat.completions.create({
-            messages: [{ role: 'user', content: prompt }],
-            model: 'llama-3.1-8b-instant',
-            temperature: 0.7,
-            max_tokens,
-            top_p: 1,
-          });
-          rawContent = chatCompletion.choices[0]?.message?.content || '';
-          totalTokensUsed += chatCompletion.usage?.total_tokens || 0;
-          break;
-        } catch (llmErr: any) {
-          if (llmErr?.status === 429 || llmErr?.error?.code === 'rate_limit_exceeded') {
-            retries++;
-            if (retries >= 3) {
-              return NextResponse.json(
-                { error: 'API rate limit reached. Please wait 60 seconds and try again.' },
-                { status: 429 },
-              );
-            }
-            await new Promise(r => setTimeout(r, 15000 * retries));
-          } else {
-            throw llmErr;
+          const { questions, tokensUsed } = await generateChunk(
+            config, basePlan, allSlots, chunk, refs,
+          );
+          totalTokensUsed += tokensUsed;
+
+          for (let j = 0; j < chunk.length; j++) {
+            finalQuestions[chunk[j]] = questions[j];
+            finalSources[chunk[j]] = 'AI Generated';
           }
+        } catch (err: any) {
+          console.error(`[AI] Chunk ${c + 1}/${chunks.length} failed:`, err.message);
+          for (const idx of chunk) {
+            finalQuestions[idx] = '[Question could not be generated. Please add manually.]';
+            finalSources[idx] = 'AI Generated';
+          }
+        }
+
+        // Delay between chunks to respect TPM (skip after last chunk)
+        if (c < chunks.length - 1) {
+          console.log(`[AI] Chunk ${c + 1}/${chunks.length} done, waiting ${CHUNK_DELAY_MS / 1000}s for TPM cooldown...`);
+          await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
         }
       }
 
-      const aiQuestions = parseQuestions(rawContent, aiNeededIndices.length);
-
-      for (let j = 0; j < aiNeededIndices.length; j++) {
-        finalQuestions[aiNeededIndices[j]] = aiQuestions[j];
-        finalSources[aiNeededIndices[j]] = 'AI Generated';
-      }
+      console.log(`[AI] All chunks done. Total tokens: ${totalTokensUsed}`);
     }
 
-    // 5. Build HTML for each set using the algorithm-built structure
+    // Build HTML for each set
     const setPlans = generateSetVariants(basePlan, numSets);
     const setLabels = ['A', 'B', 'C'];
     const results: string[] = [];
@@ -120,7 +177,7 @@ export async function POST(req: Request) {
       results.push(html);
     }
 
-    // 6. Log generation
+    // Log generation
     try {
       if (user) {
         const email = user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress || '';

@@ -89,7 +89,7 @@ function ConfigureForm() {
   const [examDuration, setExamDuration] = useState(src?.examDuration || '3 Hours');
   const [language, setLanguage] = useState(src?.language || 'English');
   const [numSets, setNumSets] = useState(src?.numSets || 1);
-  const [sourceMix, setSourceMix] = useState(src?.sourceMix || { questionBank: 50, coaching: 0, ai: 50 });
+  const [sourceMix, setSourceMix] = useState(src?.sourceMix || { questionBank: 70, coaching: 0, ai: 30 });
 
   const restoredRef = useRef(false);
 
@@ -222,7 +222,7 @@ function ConfigureForm() {
     setExamDuration('3 Hours');
     setLanguage('English');
     setNumSets(1);
-    setSourceMix({ questionBank: 50, coaching: 0, ai: 50 });
+    setSourceMix({ questionBank: 70, coaching: 0, ai: 30 });
   };
 
   const toggleChapter = (idx: number) => {
@@ -315,21 +315,9 @@ function ConfigureForm() {
     });
   };
 
-  const handleSourceChange = (key: 'questionBank' | 'coaching' | 'ai', val: number) => {
-    const others = (['questionBank', 'coaching', 'ai'] as const).filter(k => k !== key);
-    const remaining = 100 - val;
-    const otherTotal = sourceMix[others[0]] + sourceMix[others[1]];
-    setSourceMix((prev: any) => {
-      const next = { ...prev, [key]: val };
-      if (otherTotal > 0) {
-        next[others[0]] = Math.round((prev[others[0]] / otherTotal) * remaining);
-        next[others[1]] = remaining - next[others[0]];
-      } else {
-        next[others[0]] = Math.floor(remaining / 2);
-        next[others[1]] = remaining - next[others[0]];
-      }
-      return next;
-    });
+  const handleSourceChange = (dbPct: number) => {
+    const clamped = Math.max(0, Math.min(100, dbPct));
+    setSourceMix({ questionBank: clamped, coaching: 0, ai: 100 - clamped });
   };
 
   const totalMarks = customSections.reduce((sum, sec) =>
@@ -639,18 +627,28 @@ function ConfigureForm() {
             {/* Source Mix */}
             <div className={cardCls}>
               <h3 className={headCls}><Database className="w-3.5 h-3.5 mr-2 text-brand-gold" /> Question Source Mix</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {([
-                  { key: 'questionBank' as const, label: 'Question Bank', color: 'text-blue-600' },
-                  { key: 'coaching' as const, label: 'Coaching', color: 'text-amber-600' },
-                  { key: 'ai' as const, label: 'AI Generated', color: 'text-gray-500' },
-                ]).map(s => (
-                  <div key={s.key} className="text-center">
-                    <label className="block text-xs font-semibold mb-1.5 text-brand-muted">{s.label}</label>
-                    <input type="range" min={0} max={100} step={5} value={sourceMix[s.key]} onChange={e => handleSourceChange(s.key, parseInt(e.target.value))} className="w-full accent-brand-gold" />
-                    <span className={`text-sm font-bold ${s.color}`}>{sourceMix[s.key]}%</span>
-                  </div>
-                ))}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs font-semibold text-brand-muted">
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Question Bank</span>
+                  <span className="flex items-center gap-1.5">AI Generated <span className="w-2 h-2 rounded-full bg-gray-400" /></span>
+                </div>
+                <input type="range" min={0} max={100} step={5} value={sourceMix.questionBank}
+                  onChange={e => handleSourceChange(parseInt(e.target.value))}
+                  className="w-full accent-brand-gold" />
+                <div className="flex justify-between text-sm font-bold">
+                  <span className="text-blue-500">{sourceMix.questionBank}% DB</span>
+                  <span className="text-gray-500">{sourceMix.ai}% AI</span>
+                </div>
+                <div className="w-full h-3 rounded-full overflow-hidden flex bg-gray-200">
+                  <div className="h-full bg-blue-500 transition-all duration-200" style={{ width: `${sourceMix.questionBank}%` }} />
+                  <div className="h-full bg-gray-400 transition-all duration-200" style={{ width: `${sourceMix.ai}%` }} />
+                </div>
+                <p className="text-[10px] text-brand-muted">
+                  {sourceMix.questionBank > 0
+                    ? `~${Math.round(totalQuestions * sourceMix.questionBank / 100)} questions from database, ~${Math.round(totalQuestions * sourceMix.ai / 100)} AI-generated`
+                    : 'All questions will be AI-generated'}
+                  {sourceMix.questionBank > 0 && ' · AI questions are curated using DB question style'}
+                </p>
               </div>
             </div>
 
@@ -702,12 +700,19 @@ function ConfigureForm() {
               <button type="submit" disabled={isLoading} className="flex-1 flex justify-center items-center py-4 rounded-xl text-base font-bold disabled:opacity-50 text-white transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
                 style={{ background: isLoading ? 'var(--brand-muted)' : 'var(--brand-gold-gradient)' }}>
                 {isLoading
-                  ? <><Loader2 className="animate-spin mr-3 h-5 w-5" />Generating...</>
+                  ? <><Loader2 className="animate-spin mr-3 h-5 w-5" />Generating — please wait, AI batching in progress...</>
                   : <>Generate {numSets > 1 ? `${numSets} Sets` : 'Test Paper'}</>}
               </button>
             </div>
             <div className="text-center text-xs text-brand-muted font-medium flex items-center justify-center pb-6">
-              <Clock className="w-3.5 h-3.5 mr-1.5" /> ~{numSets <= 1 ? '5-10 seconds' : `${numSets} minutes (1 set/min for API limits)`}
+              <Clock className="w-3.5 h-3.5 mr-1.5" />
+              {(() => {
+                const aiQ = Math.round(totalQuestions * sourceMix.ai / 100);
+                const chunks = Math.ceil(aiQ / 8);
+                if (numSets > 1) return `~${numSets * 2} min (${numSets} sets × API rate limits)`;
+                if (chunks <= 1) return '~10-15 seconds';
+                return `~${Math.ceil(chunks * 15 / 60)}-${Math.ceil(chunks * 18 / 60)} min (${aiQ} AI questions in ${chunks} batches)`;
+              })()}
             </div>
           </form>
         </div>

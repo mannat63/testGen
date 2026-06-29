@@ -48,15 +48,22 @@ export const TOKEN_BUDGET: Record<string, number> = {
   assertion_reason: 130,
 };
 
+export interface ReferenceQuestion {
+  question: string;
+  type: string;
+  difficulty: string;
+}
+
 /**
  * Build prompt for only the AI-needed slots.
  * `aiSlotIndices` tells which slots in the plan need LLM generation.
- * The LLM output uses Q1, Q2... numbering matching the order of aiSlotIndices.
+ * `referenceQuestions` provides sample questions from the DB for style matching.
  */
 export function generateTestPrompt(
   config: PromptConfig,
   plan: PaperPlan,
   aiSlotIndices?: number[],
+  referenceQuestions?: Map<string, ReferenceQuestion[]>,
 ): string {
   const allSlots: QuestionSlot[] = plan.sections.flatMap(s => s.slots);
 
@@ -79,6 +86,23 @@ export function generateTestPrompt(
     qList += `Q${i + 1}. ${type}[${cKey},${diff}]\n`;
   });
 
+  // Build reference section from DB questions for AI curation
+  let refSection = '';
+  if (referenceQuestions && referenceQuestions.size > 0) {
+    const refLines: string[] = [];
+    for (const chapter of uniqueChapters) {
+      const refs = referenceQuestions.get(chapter);
+      if (!refs || refs.length === 0) continue;
+      const cKey = chapterMap[chapter];
+      for (const ref of refs) {
+        refLines.push(`[${cKey}/${ref.type || '?'}/${ref.difficulty || '?'}] ${ref.question}`);
+      }
+    }
+    if (refLines.length > 0) {
+      refSection = `\nReference questions from the question bank (match this style, difficulty level, and academic rigor):\n${refLines.join('\n')}\n`;
+    }
+  }
+
   const classText = config.class_grade.toLowerCase().startsWith('class') ? config.class_grade : `Class ${config.class_grade}`;
   return `${config.board} ${config.subject} ${classText} question paper setter.
 Write ONLY question text. No marks, no answers, no section headers.
@@ -87,7 +111,7 @@ Types: MCQ=question+(a)(b)(c)(d) | SA=short answer | LA=long answer | NUM=numeri
 
 Chapters: ${chapterIndex}
 Difficulty: E=easy M=medium H=hard
-
+${refSection}
 Please generate ALL ${slotsToGenerate.length} questions listed below:
 ${qList}
 Rules:
@@ -95,6 +119,6 @@ Rules:
 - You MUST generate all ${slotsToGenerate.length} questions. Do not stop early.
 - MCQ/AR: options on new lines labelled (a)(b)(c)(d)
 - Match specified chapter and difficulty
-- ${config.board}-standard exam quality
+- ${config.board}-standard exam quality${refSection ? '\n- Match the style and academic standard of the reference questions above' : ''}
 - NO answers, NO answer keys, NO marks`;
 }
