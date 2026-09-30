@@ -7,6 +7,10 @@ import { buildPaperPlan, generateSetVariants, ChapterSelection } from '@/lib/pap
 import { sourceQuestions, fetchReferenceQuestions, SourcedQuestion } from '@/lib/questionSource';
 import { PaperSection } from '@/config/examPatterns';
 import { getGenerationLogModel } from '@/models/GenerationLog';
+import {
+  validateStructure, buildValidationReport, buildSemanticValidationPrompt,
+  parseSemanticValidation, ValidationInput, ValidationIssue,
+} from '@/lib/validatePaper';
 
 export const maxDuration = 180;
 
@@ -165,7 +169,7 @@ export async function POST(req: Request) {
 
       console.log(`[AI] All chunks done. Total tokens: ${totalTokensUsed}`);
 
-      // Generate answers for AI questions
+      // Generate answers for AI questions (must complete before validation)
       if (process.env.GROQ_API_KEY) {
         const aiQuestionsForAnswers = aiNeededIndices
           .filter(i => finalQuestions[i] && !finalQuestions[i].startsWith('[Question could not'))
@@ -206,6 +210,56 @@ export async function POST(req: Request) {
         }
       }
     }
+
+    // ── Post-generation validation ──
+    const validationInputs: ValidationInput[] = [];
+    for (let i = 0; i < totalSlots; i++) {
+      validationInputs.push({
+        qNum: i + 1,
+        text: finalQuestions[i],
+        questionType: allSlots[i].questionType,
+        chapterName: allSlots[i].chapterName,
+        difficulty: allSlots[i].difficulty,
+        marksEach: allSlots[i].marksEach,
+        source: finalSources[i] || 'AI Generated',
+      });
+    }
+
+    // Deterministic structural checks (fast, free, reliable)
+    const validationIssues: ValidationIssue[] = validateStructure(validationInputs);
+
+    // Best-effort LLM semantic check — AI questions only (DB questions are pre-verified)
+    if (process.env.GROQ_API_KEY) {
+      const aiToCheck = validationInputs.filter(
+        q => q.source === 'AI Generated' && q.text && !q.text.toLowerCase().includes('[question could not'),
+      );
+      if (aiToCheck.length > 0) {
+        try {
+          console.log(`[Validate] Semantic check on ${aiToCheck.length} AI questions...`);
+          await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
+
+          const validationPrompt = buildSemanticValidationPrompt(config, aiToCheck);
+          const completion = await groq.chat.completions.create({
+            messages: [{ role: 'user', content: validationPrompt }],
+            model: 'llama-3.1-8b-instant',
+            temperature: 0.1,
+            max_tokens: Math.min(Math.max(aiToCheck.length * 20, 200), 1500),
+            top_p: 1,
+          });
+          const raw = completion.choices[0]?.message?.content || '';
+          totalTokensUsed += completion.usage?.total_tokens || 0;
+          const validQNums = new Set(aiToCheck.map(q => q.qNum));
+          const semanticIssues = parseSemanticValidation(raw, validQNums);
+          validationIssues.push(...semanticIssues);
+          console.log(`[Validate] Semantic check found ${semanticIssues.length} issues`);
+        } catch (err: any) {
+          console.error('[Validate] Semantic validation failed (non-critical):', err.message);
+        }
+      }
+    }
+
+    const validationReport = buildValidationReport(validationIssues, totalSlots);
+    console.log(`[Validate] ${validationReport.errorCount} errors, ${validationReport.warningCount} warnings across ${totalSlots} questions`);
 
     // Build answer entries for the answer key
     const answerEntries: AnswerEntry[] = [];
@@ -271,7 +325,7 @@ export async function POST(req: Request) {
       }
     } catch { /* logging failure shouldn't block generation */ }
 
-    return NextResponse.json({ data: results, answerKeys });
+    return NextResponse.json({ data: results, answerKeys, validation: validationReport });
 
   } catch (error: any) {
     console.error('API Error:', error);

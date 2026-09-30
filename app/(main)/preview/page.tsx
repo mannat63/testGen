@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePaperStore } from '@/store/paperStore';
-import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen } from 'lucide-react';
+import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen, ShieldCheck, AlertTriangle, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -16,7 +16,7 @@ const REGEN_COOLDOWN_MS = 60_000;
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { generatedPapers, answerKeys, config, setPapers } = usePaperStore();
+  const { generatedPapers, answerKeys, validation, config, setPapers } = usePaperStore();
   const paperRef = useRef<HTMLDivElement>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -29,6 +29,7 @@ export default function PreviewPage() {
   const [regenLoading, setRegenLoading] = useState<number | null>(null);
   const [regenCooldown, setRegenCooldown] = useState(0);
   const regenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [showValidation, setShowValidation] = useState(false);
 
   const papers = generatedPapers;
   const setLabels = ['A', 'B', 'C'];
@@ -168,8 +169,8 @@ export default function PreviewPage() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to regenerate');
       }
-      const { data, answerKeys: newAnswerKeys } = await res.json();
-      setPapers(Array.isArray(data) ? data : [data], config, newAnswerKeys);
+      const { data, answerKeys: newAnswerKeys, validation: newValidation } = await res.json();
+      setPapers(Array.isArray(data) ? data : [data], config, newAnswerKeys, newValidation);
       setActiveSet(0);
       startCooldown();
     } catch (err: any) {
@@ -481,6 +482,58 @@ export default function PreviewPage() {
       </div>
 
       <main className="flex-1 px-4 sm:px-6 md:px-12 pb-8 overflow-auto">
+        {/* Validation banner */}
+        {validation && (
+          <div className="max-w-5xl mx-auto mb-4 no-print">
+            <button
+              onClick={() => setShowValidation(v => !v)}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-sm font-medium shadow-sm transition-colors ${
+                validation.errorCount > 0
+                  ? 'bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400'
+                  : validation.warningCount > 0
+                    ? 'bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400'
+                    : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {validation.errorCount > 0 || validation.warningCount > 0
+                  ? <AlertTriangle className="w-4 h-4" />
+                  : <ShieldCheck className="w-4 h-4" />}
+                {validation.errorCount === 0 && validation.warningCount === 0
+                  ? `Quality check passed — all ${validation.totalChecked} questions look good.`
+                  : `Quality check: ${validation.errorCount} error${validation.errorCount !== 1 ? 's' : ''}, ${validation.warningCount} warning${validation.warningCount !== 1 ? 's' : ''} across ${validation.totalChecked} questions.`}
+              </span>
+              {validation.issues.length > 0 && (
+                <ChevronDown className={`w-4 h-4 transition-transform ${showValidation ? 'rotate-180' : ''}`} />
+              )}
+            </button>
+
+            {showValidation && validation.issues.length > 0 && (
+              <div className="mt-2 rounded-lg border border-brand-border bg-brand-card divide-y divide-brand-border/60 overflow-hidden">
+                {validation.issues.map((issue, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => scrollToQuestion(issue.qNum)}
+                    className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-brand-border/30 transition-colors"
+                  >
+                    <span className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                      issue.severity === 'error'
+                        ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                    }`}>
+                      {issue.severity}
+                    </span>
+                    <span className="shrink-0 text-xs font-bold text-foreground">Q{issue.qNum}</span>
+                    <span className="text-xs text-brand-muted flex-1">
+                      <span className="text-foreground-soft">{issue.category}</span> — {issue.message}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="max-w-5xl mx-auto mb-4 bg-brand-gold/10 border border-brand-gold/30 text-brand-gold font-medium px-4 py-3 rounded-lg flex items-center justify-center text-sm shadow-sm animate-fade-in-up no-print">
           <Pencil className="w-4 h-4 mr-2" />
           Click inside the paper to edit. Use "Regen Q#" above to replace any question.

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ValidationReport } from '@/lib/validatePaper';
 
 interface PaperConfig {
   board: string;
@@ -21,10 +22,11 @@ interface PaperConfig {
 interface PaperState {
   generatedPapers: string[];
   answerKeys: string[];
+  validation: ValidationReport | null;
   generatedPaperHtml: string | null;
   config: PaperConfig | null;
   lastUsedConfig: PaperConfig | null;
-  setPapers: (htmls: string[], config: PaperConfig, answerKeys?: string[]) => void;
+  setPapers: (htmls: string[], config: PaperConfig, answerKeys?: string[], validation?: ValidationReport | null) => void;
   setPaper: (html: string, config: PaperConfig) => void;
   clearPaper: () => void;
   resetConfig: () => void;
@@ -33,12 +35,14 @@ interface PaperState {
 export const usePaperStore = create<PaperState>((set) => ({
   generatedPapers: [],
   answerKeys: [],
+  validation: null,
   generatedPaperHtml: null,
   config: null,
   lastUsedConfig: null,
-  setPapers: (htmls, config, answerKeys) => set({
+  setPapers: (htmls, config, answerKeys, validation) => set({
     generatedPapers: htmls,
     answerKeys: answerKeys || [],
+    validation: validation || null,
     generatedPaperHtml: htmls[0] || null,
     config,
     lastUsedConfig: config,
@@ -46,6 +50,7 @@ export const usePaperStore = create<PaperState>((set) => ({
   setPaper: (html, config) => set({
     generatedPapers: [html],
     answerKeys: [],
+    validation: null,
     generatedPaperHtml: html,
     config,
     lastUsedConfig: config,
@@ -53,12 +58,14 @@ export const usePaperStore = create<PaperState>((set) => ({
   clearPaper: () => set({
     generatedPapers: [],
     answerKeys: [],
+    validation: null,
     generatedPaperHtml: null,
     config: null,
   }),
   resetConfig: () => set({
     generatedPapers: [],
     answerKeys: [],
+    validation: null,
     generatedPaperHtml: null,
     config: null,
     lastUsedConfig: null,

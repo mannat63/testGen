@@ -384,8 +384,8 @@ function ConfigureForm() {
         const errData = await res.json();
         throw new Error(errData.error || 'Failed to generate paper');
       }
-      const { data, answerKeys } = await res.json();
-      setPapers(Array.isArray(data) ? data : [data], config, answerKeys);
+      const { data, answerKeys, validation } = await res.json();
+      setPapers(Array.isArray(data) ? data : [data], config, answerKeys, validation);
       clearDraft();
       router.push('/preview');
     } catch (err: any) {
