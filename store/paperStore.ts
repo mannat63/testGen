@@ -20,10 +20,11 @@ interface PaperConfig {
 
 interface PaperState {
   generatedPapers: string[];
+  answerKeys: string[];
   generatedPaperHtml: string | null;
   config: PaperConfig | null;
   lastUsedConfig: PaperConfig | null;
-  setPapers: (htmls: string[], config: PaperConfig) => void;
+  setPapers: (htmls: string[], config: PaperConfig, answerKeys?: string[]) => void;
   setPaper: (html: string, config: PaperConfig) => void;
   clearPaper: () => void;
   resetConfig: () => void;
@@ -31,28 +32,33 @@ interface PaperState {
 
 export const usePaperStore = create<PaperState>((set) => ({
   generatedPapers: [],
+  answerKeys: [],
   generatedPaperHtml: null,
   config: null,
   lastUsedConfig: null,
-  setPapers: (htmls, config) => set({
+  setPapers: (htmls, config, answerKeys) => set({
     generatedPapers: htmls,
+    answerKeys: answerKeys || [],
     generatedPaperHtml: htmls[0] || null,
     config,
     lastUsedConfig: config,
   }),
   setPaper: (html, config) => set({
     generatedPapers: [html],
+    answerKeys: [],
     generatedPaperHtml: html,
     config,
     lastUsedConfig: config,
   }),
   clearPaper: () => set({
     generatedPapers: [],
+    answerKeys: [],
     generatedPaperHtml: null,
     config: null,
   }),
   resetConfig: () => set({
     generatedPapers: [],
+    answerKeys: [],
     generatedPaperHtml: null,
     config: null,
     lastUsedConfig: null,

@@ -2,6 +2,25 @@ import { PaperPlan } from './paperAlgorithm';
 import { PromptConfig } from './generatePrompt';
 import { SourcedQuestion } from './questionSource';
 
+export function parseAnswerKey(rawText: string, qNums: number[]): Map<number, string> {
+  const answers = new Map<number, string>();
+  const markerRegex = /(?:^|\n)\s*Q\.?\s*(\d+)[\.\)\:]?\s*/gi;
+  const markers: { qNum: number; contentStart: number; matchStart: number }[] = [];
+  let m;
+  while ((m = markerRegex.exec(rawText)) !== null) {
+    markers.push({ qNum: parseInt(m[1]), contentStart: m.index + m[0].length, matchStart: m.index });
+  }
+  for (let i = 0; i < markers.length; i++) {
+    const end = i + 1 < markers.length ? markers[i + 1].matchStart : rawText.length;
+    let text = rawText.substring(markers[i].contentStart, end).trim();
+    text = text.replace(/^(?:Answer|Ans)\s*[:\-]\s*/i, '').trim();
+    if (qNums.includes(markers[i].qNum) && text) {
+      answers.set(markers[i].qNum, text);
+    }
+  }
+  return answers;
+}
+
 export function parseQuestions(rawText: string, expectedCount: number): string[] {
   const fallback = '[Question could not be generated. Please add manually.]';
   const questions: string[] = new Array(expectedCount).fill(fallback);
@@ -221,4 +240,70 @@ function escAttr(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+export interface AnswerEntry {
+  qNum: number;
+  questionType: string;
+  marksEach: number;
+  chapterName: string;
+  answer: string;
+  source: string;
+}
+
+export function buildAnswerKeyHtml(
+  answers: AnswerEntry[],
+  config: PromptConfig,
+  setLabel?: string,
+): string {
+  const font = "'Calibri', 'Arial', sans-serif";
+  const lines: string[] = [];
+
+  lines.push(`<div style="text-align:center;margin-bottom:18px;">`);
+  lines.push(`<div style="font-size:22px;font-weight:800;font-family:${font};color:#111827;margin-bottom:6px;">${esc(config.schoolName || 'SCHOOL / INSTITUTE NAME')}</div>`);
+  if (setLabel) {
+    lines.push(`<div style="font-size:14px;font-weight:700;font-family:${font};color:#dc2626;margin-bottom:4px;letter-spacing:2px;">SET ${setLabel} — ANSWER KEY</div>`);
+  } else {
+    lines.push(`<div style="font-size:14px;font-weight:700;font-family:${font};color:#dc2626;margin-bottom:4px;letter-spacing:2px;">ANSWER KEY</div>`);
+  }
+  lines.push(`<div style="font-size:16px;font-weight:700;font-family:${font};color:#1f2937;">${esc(config.examName || 'Examination')}${config.examDate ? ' — ' + esc(config.examDate) : ''}</div>`);
+  const classText = config.class_grade.toLowerCase().startsWith('class') ? config.class_grade : `Class ${config.class_grade}`;
+  lines.push(`<div style="font-size:14px;font-weight:600;font-family:${font};color:#1f2937;">${esc(classText)} — ${esc(config.subject)}</div>`);
+  lines.push(`</div>`);
+
+  lines.push(`<div style="font-size:11px;font-family:${font};color:#6b7280;margin-bottom:16px;padding:6px 10px;background:#fef9c3;border:1px solid #fde68a;border-radius:4px;text-align:center;">`);
+  lines.push(`<strong>CONFIDENTIAL — FOR TEACHER USE ONLY</strong>`);
+  lines.push(`</div>`);
+
+  lines.push(`<table style="width:100%;border-collapse:collapse;font-family:${font};font-size:14px;">`);
+  lines.push(`<thead><tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1;">`);
+  lines.push(`<th style="padding:8px 10px;text-align:left;font-weight:700;color:#334155;width:50px;">Q#</th>`);
+  lines.push(`<th style="padding:8px 10px;text-align:left;font-weight:700;color:#334155;width:80px;">Type</th>`);
+  lines.push(`<th style="padding:8px 10px;text-align:left;font-weight:700;color:#334155;width:50px;">Marks</th>`);
+  lines.push(`<th style="padding:8px 10px;text-align:left;font-weight:700;color:#334155;">Answer / Key Points</th>`);
+  lines.push(`</tr></thead><tbody>`);
+
+  for (let i = 0; i < answers.length; i++) {
+    const a = answers[i];
+    const bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+    const sourceColor = a.source === 'Question Bank' ? '#1d4ed8' : '#6b7280';
+    const sourceLabel = a.source === 'Question Bank' ? 'QB' : 'AI';
+
+    const answerHtml = esc(a.answer)
+      .replace(/\n- /g, '<br>• ')
+      .replace(/\n/g, '<br>');
+
+    lines.push(`<tr style="background:${bg};border-bottom:1px solid #e2e8f0;">`);
+    lines.push(`<td style="padding:8px 10px;font-weight:700;color:#1e293b;vertical-align:top;">Q${a.qNum}</td>`);
+    lines.push(`<td style="padding:8px 10px;color:#475569;vertical-align:top;">${esc(TYPE_LABELS[a.questionType] || a.questionType)} <span style="font-size:9px;padding:1px 4px;border-radius:3px;color:${sourceColor};font-weight:700;">${sourceLabel}</span></td>`);
+    lines.push(`<td style="padding:8px 10px;color:#475569;vertical-align:top;text-align:center;">${a.marksEach}</td>`);
+    lines.push(`<td style="padding:8px 10px;color:#1e293b;line-height:1.6;vertical-align:top;">${answerHtml}</td>`);
+    lines.push(`</tr>`);
+  }
+
+  lines.push(`</tbody></table>`);
+
+  lines.push(`<div style="font-size:10px;font-family:${font};color:#9ca3af;margin-top:20px;text-align:center;border-top:1px solid #e5e7eb;padding-top:8px;">Answer Key — ${answers.length} questions | Generated by Intellogy Corporation</div>`);
+
+  return lines.join('\n');
 }

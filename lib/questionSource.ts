@@ -4,6 +4,7 @@ import { getCommonDBModel } from '@/models/CommonDB';
 export interface SourcedQuestion {
   text: string;
   source: string;
+  answer?: string;
 }
 
 export interface SourceMix {
@@ -275,7 +276,8 @@ async function fetchFromCommonDB(
           }
           if (text) {
             if (item.docId) seenIds.add(item.docId);
-            result.set(slotIdx, { text, source: 'Question Bank' });
+            const answer = item.rawDoc?.answer ?? item.rawDoc?.correct_answer ?? item.rawDoc?.correctAnswer ?? undefined;
+            result.set(slotIdx, { text, source: 'Question Bank', answer: answer ? String(answer).trim() : undefined });
             filled++;
             assigned = true;
             madeProgress = true;

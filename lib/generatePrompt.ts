@@ -122,3 +122,36 @@ Rules:
 - ${config.board}-standard exam quality${refSection ? '\n- Match the style and academic standard of the reference questions above' : ''}
 - NO answers, NO answer keys, NO marks`;
 }
+
+export function generateAnswerKeyPrompt(
+  config: PromptConfig,
+  questions: { qNum: number; text: string; questionType: string; marksEach: number }[],
+): string {
+  if (questions.length === 0) return '';
+
+  const classText = config.class_grade.toLowerCase().startsWith('class') ? config.class_grade : `Class ${config.class_grade}`;
+
+  let qList = '';
+  for (const q of questions) {
+    const typeLabel = TYPE_SHORT[q.questionType] || q.questionType.toUpperCase();
+    const truncated = q.text.length > 300 ? q.text.substring(0, 300) + '...' : q.text;
+    qList += `Q${q.qNum}. [${typeLabel}, ${q.marksEach}m] ${truncated}\n\n`;
+  }
+
+  return `${config.board} ${config.subject} ${classText} — answer key generator.
+For each question, provide ONLY the answer in the format shown below.
+
+${qList}
+Format your response as:
+Q1. Answer: <answer>
+Q2. Answer: <answer>
+...
+
+Rules:
+- MCQ/AR: state the correct option letter, e.g. "(b)"
+- Short answer: 1-2 sentence answer
+- Long answer: key points as a brief outline (3-5 bullet points)
+- Numerical: final answer with units
+- Be concise — this is an answer KEY, not a full solution
+- Generate answers for ALL ${questions.length} questions`;
+}

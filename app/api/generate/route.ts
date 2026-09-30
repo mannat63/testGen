@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 import { currentUser } from '@clerk/nextjs/server';
-import { generateTestPrompt, PromptConfig, TOKEN_BUDGET } from '@/lib/generatePrompt';
-import { parseQuestions, buildPaperHtml } from '@/lib/formatPaper';
+import { generateTestPrompt, generateAnswerKeyPrompt, PromptConfig, TOKEN_BUDGET } from '@/lib/generatePrompt';
+import { parseQuestions, parseAnswerKey, buildPaperHtml, buildAnswerKeyHtml, AnswerEntry } from '@/lib/formatPaper';
 import { buildPaperPlan, generateSetVariants, ChapterSelection } from '@/lib/paperAlgorithm';
 import { sourceQuestions, fetchReferenceQuestions, SourcedQuestion } from '@/lib/questionSource';
 import { PaperSection } from '@/config/examPatterns';
@@ -97,6 +97,7 @@ export async function POST(req: Request) {
 
     const finalQuestions: string[] = new Array(totalSlots).fill('');
     const finalSources: (SourcedQuestion['source'] | null)[] = new Array(totalSlots).fill(null);
+    const finalAnswers: (string | null)[] = new Array(totalSlots).fill(null);
     const aiNeededIndices: number[] = [];
 
     for (let i = 0; i < totalSlots; i++) {
@@ -104,6 +105,7 @@ export async function POST(req: Request) {
       if (sq) {
         finalQuestions[i] = sq.text;
         finalSources[i] = sq.source;
+        finalAnswers[i] = sq.answer || null;
       } else {
         aiNeededIndices.push(i);
       }
@@ -135,7 +137,6 @@ export async function POST(req: Request) {
 
       for (let c = 0; c < chunks.length; c++) {
         const chunk = chunks[c];
-        // Only include reference questions for the first chunk
         const refs = c === 0 ? referenceQuestions : undefined;
 
         try {
@@ -156,7 +157,6 @@ export async function POST(req: Request) {
           }
         }
 
-        // Delay between chunks to respect TPM (skip after last chunk)
         if (c < chunks.length - 1) {
           console.log(`[AI] Chunk ${c + 1}/${chunks.length} done, waiting ${CHUNK_DELAY_MS / 1000}s for TPM cooldown...`);
           await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
@@ -164,17 +164,87 @@ export async function POST(req: Request) {
       }
 
       console.log(`[AI] All chunks done. Total tokens: ${totalTokensUsed}`);
+
+      // Generate answers for AI questions
+      if (process.env.GROQ_API_KEY) {
+        const aiQuestionsForAnswers = aiNeededIndices
+          .filter(i => finalQuestions[i] && !finalQuestions[i].startsWith('[Question could not'))
+          .map(i => ({
+            qNum: i + 1,
+            text: finalQuestions[i],
+            questionType: allSlots[i].questionType,
+            marksEach: allSlots[i].marksEach,
+          }));
+
+        if (aiQuestionsForAnswers.length > 0) {
+          try {
+            console.log(`[AI] Generating answer key for ${aiQuestionsForAnswers.length} AI questions...`);
+            await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
+
+            const answerPrompt = generateAnswerKeyPrompt(config, aiQuestionsForAnswers);
+            const estimatedTokens = aiQuestionsForAnswers.length * 60;
+            const completion = await groq.chat.completions.create({
+              messages: [{ role: 'user', content: answerPrompt }],
+              model: 'llama-3.1-8b-instant',
+              temperature: 0.3,
+              max_tokens: Math.min(Math.max(estimatedTokens, 400), 3000),
+              top_p: 1,
+            });
+
+            const raw = completion.choices[0]?.message?.content || '';
+            totalTokensUsed += completion.usage?.total_tokens || 0;
+            const qNums = aiQuestionsForAnswers.map(q => q.qNum);
+            const parsed = parseAnswerKey(raw, qNums);
+
+            for (const [qNum, answer] of parsed) {
+              finalAnswers[qNum - 1] = answer;
+            }
+            console.log(`[AI] Answer key: got ${parsed.size}/${aiQuestionsForAnswers.length} answers`);
+          } catch (err: any) {
+            console.error('[AI] Answer key generation failed (non-critical):', err.message);
+          }
+        }
+      }
+    }
+
+    // Build answer entries for the answer key
+    const answerEntries: AnswerEntry[] = [];
+    for (let i = 0; i < totalSlots; i++) {
+      answerEntries.push({
+        qNum: i + 1,
+        questionType: allSlots[i].questionType,
+        marksEach: allSlots[i].marksEach,
+        chapterName: allSlots[i].chapterName,
+        answer: finalAnswers[i] || 'Answer not available',
+        source: finalSources[i] || 'AI Generated',
+      });
     }
 
     // Build HTML for each set
     const setPlans = generateSetVariants(basePlan, numSets);
     const setLabels = ['A', 'B', 'C'];
     const results: string[] = [];
+    const answerKeys: string[] = [];
 
     for (let s = 0; s < setPlans.length; s++) {
       const setLabel = numSets > 1 ? setLabels[s] : undefined;
       const html = buildPaperHtml(setPlans[s], finalQuestions, config, setLabel, finalSources);
       results.push(html);
+
+      // Build answer key with slot ordering matching this set's question order
+      const setSlots = setPlans[s].sections.flatMap(sec => sec.slots);
+      const setAnswers: AnswerEntry[] = setSlots.map((slot, idx) => {
+        const origIdx = slot.originalIndex ?? idx;
+        return {
+          qNum: idx + 1,
+          questionType: slot.questionType,
+          marksEach: slot.marksEach,
+          chapterName: slot.chapterName,
+          answer: finalAnswers[origIdx] || 'Answer not available',
+          source: finalSources[origIdx] || 'AI Generated',
+        };
+      });
+      answerKeys.push(buildAnswerKeyHtml(setAnswers, config, setLabel));
     }
 
     // Log generation
@@ -201,7 +271,7 @@ export async function POST(req: Request) {
       }
     } catch { /* logging failure shouldn't block generation */ }
 
-    return NextResponse.json({ data: results });
+    return NextResponse.json({ data: results, answerKeys });
 
   } catch (error: any) {
     console.error('API Error:', error);

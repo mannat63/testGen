@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePaperStore } from '@/store/paperStore';
-import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen } from 'lucide-react';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -16,7 +16,7 @@ const REGEN_COOLDOWN_MS = 60_000;
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { generatedPapers, config, setPapers } = usePaperStore();
+  const { generatedPapers, answerKeys, config, setPapers } = usePaperStore();
   const paperRef = useRef<HTMLDivElement>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -168,8 +168,8 @@ export default function PreviewPage() {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to regenerate');
       }
-      const { data } = await res.json();
-      setPapers(Array.isArray(data) ? data : [data], config);
+      const { data, answerKeys: newAnswerKeys } = await res.json();
+      setPapers(Array.isArray(data) ? data : [data], config, newAnswerKeys);
       setActiveSet(0);
       startCooldown();
     } catch (err: any) {
@@ -314,6 +314,48 @@ export default function PreviewPage() {
     } finally { setIsGeneratingPdf(false); }
   };
 
+  const handleDownloadAnswerKey = () => {
+    const akHtml = answerKeys?.[activeSet];
+    if (!akHtml) return;
+    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Answer Key</title></head><body>";
+    const footer = "</body></html>";
+    const src = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(header + akHtml + footer);
+    const a = document.createElement("a");
+    document.body.appendChild(a);
+    a.href = src;
+    const setSuffix = papers.length > 1 ? `_Set${setLabels[activeSet]}` : '';
+    a.download = `${config?.examName || config?.board || 'Exam'}_${config?.subject || 'Paper'}${setSuffix}_AnswerKey.doc`;
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDownloadAnswerKeyPdf = async () => {
+    const akHtml = answerKeys?.[activeSet];
+    if (!akHtml) return;
+    setIsGeneratingPdf(true);
+    try {
+      const container = document.createElement('div');
+      container.innerHTML = akHtml;
+      container.style.padding = '20px';
+      container.style.background = '#ffffff';
+      document.body.appendChild(container);
+
+      const html2pdf = (await import('html2pdf.js')).default;
+      const setSuffix = papers.length > 1 ? `_Set${setLabels[activeSet]}` : '';
+      await html2pdf().set({
+        margin: [15, 15, 15, 15] as [number, number, number, number],
+        filename: `${config?.examName || config?.board || 'Exam'}_${config?.subject || 'Paper'}${setSuffix}_AnswerKey.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      } as any).from(container).save();
+
+      document.body.removeChild(container);
+    } catch {
+      alert('Failed to generate Answer Key PDF. Please try again.');
+    } finally { setIsGeneratingPdf(false); }
+  };
+
   const btnBase = "inline-flex items-center px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 shadow-sm";
 
   return (
@@ -374,6 +416,19 @@ export default function PreviewPage() {
               className={`${btnBase} text-white`} style={{ background: 'var(--brand-gold-gradient)', opacity: isGeneratingPdf ? 0.6 : 1 }}>
               <Download className="mr-2 h-4 w-4" /> {isGeneratingPdf ? 'Generating...' : 'PDF'}
             </button>
+            {answerKeys.length > 0 && answerKeys[activeSet] && (
+              <>
+                <button onClick={handleDownloadAnswerKey}
+                  className={`${btnBase} bg-emerald-600 text-white hover:bg-emerald-700`}>
+                  <BookOpen className="mr-2 h-4 w-4" /> Answer Key
+                </button>
+                <button onClick={handleDownloadAnswerKeyPdf} disabled={isGeneratingPdf}
+                  className={`${btnBase} bg-emerald-700 text-white hover:bg-emerald-800`}
+                  style={{ opacity: isGeneratingPdf ? 0.6 : 1 }}>
+                  <BookOpen className="mr-2 h-4 w-4" /> AK PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
