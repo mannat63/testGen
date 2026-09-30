@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePaperStore } from '@/store/paperStore';
-import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen, ShieldCheck, AlertTriangle, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen, ShieldCheck, AlertTriangle, ChevronDown, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
@@ -13,10 +13,12 @@ interface SectionInfo {
 }
 
 const REGEN_COOLDOWN_MS = 60_000;
+const AUTO_REPAIR_DELAY_MS = 5_000;
+const MAX_AUTO_REPAIR = 12;
 
 export default function PreviewPage() {
   const router = useRouter();
-  const { generatedPapers, answerKeys, validation, config, setPapers } = usePaperStore();
+  const { generatedPapers, answerKeys, validation, config, setPapers, setValidation } = usePaperStore();
   const paperRef = useRef<HTMLDivElement>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -30,6 +32,8 @@ export default function PreviewPage() {
   const [regenCooldown, setRegenCooldown] = useState(0);
   const regenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showValidation, setShowValidation] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [repairProgress, setRepairProgress] = useState<{ done: number; total: number } | null>(null);
 
   const papers = generatedPapers;
   const setLabels = ['A', 'B', 'C'];
@@ -185,31 +189,24 @@ export default function PreviewPage() {
     }
   };
 
-  const handleRegenerateQuestion = async (qNum: number) => {
-    if (!paperRef.current || !config || regenCooldown > 0) return;
+  // Core regeneration: reads slot data from DOM, calls the API, replaces the
+  // question in place. Returns a status. No cooldown/scroll/highlight side effects
+  // so it can be reused by both manual regen and batch auto-repair.
+  const regenerateQuestionInPlace = async (qNum: number): Promise<'ok' | 'ratelimit' | 'notfound' | 'error'> => {
+    if (!paperRef.current || !config) return 'error';
 
     const qEl = paperRef.current.querySelector(`#paper-q-${qNum}`);
-    if (!qEl) {
-      alert(`Question Q${qNum} not found in the paper.`);
-      return;
-    }
+    if (!qEl) return 'notfound';
 
     const slotDataAttr = qEl.getAttribute('data-slot');
-    if (!slotDataAttr) {
-      alert('Cannot regenerate this question — missing slot data.');
-      return;
-    }
+    if (!slotDataAttr) return 'notfound';
 
     let slotInfo: any;
     try {
       slotInfo = JSON.parse(slotDataAttr);
     } catch {
-      alert('Invalid question data.');
-      return;
+      return 'error';
     }
-
-    setRegenLoading(qNum);
-    scrollToQuestion(qNum);
 
     try {
       const res = await fetch('/api/regenerate', {
@@ -228,16 +225,12 @@ export default function PreviewPage() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        if (res.status === 429 || errData.error?.includes('rate')) {
-          startCooldown();
-          alert('Rate limit reached. Please wait 60 seconds.');
-          return;
-        }
-        throw new Error(errData.error || 'Failed to regenerate');
+        if (res.status === 429 || errData.error?.includes('rate')) return 'ratelimit';
+        return 'error';
       }
 
       const { question } = await res.json();
-      if (!question) throw new Error('Empty response');
+      if (!question) return 'error';
 
       const { main, options } = splitQuestionAndOptions(question);
       const font = "'Calibri', 'Arial', sans-serif";
@@ -257,14 +250,84 @@ export default function PreviewPage() {
         </div>
         ${optionsHtml}
       `;
-
-      highlightQuestion(qEl, '#10b981');
-      startCooldown();
-
+      return 'ok';
     } catch {
-      alert(`Failed to regenerate Q${qNum}. Please try again.`);
+      return 'error';
+    }
+  };
+
+  const handleRegenerateQuestion = async (qNum: number) => {
+    if (!paperRef.current || !config || regenCooldown > 0) return;
+    const qEl = paperRef.current.querySelector(`#paper-q-${qNum}`);
+    if (!qEl) {
+      alert(`Question Q${qNum} not found in the paper.`);
+      return;
+    }
+
+    setRegenLoading(qNum);
+    scrollToQuestion(qNum);
+    try {
+      const status = await regenerateQuestionInPlace(qNum);
+      if (status === 'ratelimit') {
+        startCooldown();
+        alert('Rate limit reached. Please wait 60 seconds.');
+      } else if (status === 'ok') {
+        highlightQuestion(qEl, '#10b981');
+        startCooldown();
+      } else {
+        alert(`Failed to regenerate Q${qNum}. Please try again.`);
+      }
     } finally {
       setRegenLoading(null);
+    }
+  };
+
+  const handleAutoRepair = async () => {
+    if (!validation || !config || isRepairing || regenCooldown > 0) return;
+
+    // Errors first, then warnings; unique question numbers.
+    const errorQNums = [...new Set(validation.issues.filter(i => i.severity === 'error').map(i => i.qNum))];
+    const warningQNums = [...new Set(validation.issues.filter(i => i.severity === 'warning').map(i => i.qNum))]
+      .filter(q => !errorQNums.includes(q));
+    const toRepair = [...errorQNums, ...warningQNums].slice(0, MAX_AUTO_REPAIR);
+    if (toRepair.length === 0) return;
+
+    setIsRepairing(true);
+    setRepairProgress({ done: 0, total: toRepair.length });
+    const repaired: number[] = [];
+    let hitRateLimit = false;
+
+    for (let idx = 0; idx < toRepair.length; idx++) {
+      const qNum = toRepair[idx];
+      scrollToQuestion(qNum);
+      const status = await regenerateQuestionInPlace(qNum);
+      if (status === 'ratelimit') { hitRateLimit = true; break; }
+      if (status === 'ok') {
+        repaired.push(qNum);
+        const qEl = paperRef.current?.querySelector(`#paper-q-${qNum}`);
+        if (qEl) highlightQuestion(qEl, '#10b981');
+      }
+      setRepairProgress({ done: idx + 1, total: toRepair.length });
+      if (idx < toRepair.length - 1) await new Promise(r => setTimeout(r, AUTO_REPAIR_DELAY_MS));
+    }
+
+    // Clear repaired issues from the validation report.
+    if (repaired.length > 0) {
+      const remaining = validation.issues.filter(i => !repaired.includes(i.qNum));
+      setValidation({
+        ...validation,
+        issues: remaining,
+        errorCount: remaining.filter(i => i.severity === 'error').length,
+        warningCount: remaining.filter(i => i.severity === 'warning').length,
+        passed: remaining.filter(i => i.severity === 'error').length === 0,
+      });
+    }
+
+    setIsRepairing(false);
+    setRepairProgress(null);
+    if (hitRateLimit) {
+      startCooldown();
+      alert(`Repaired ${repaired.length} question(s), then hit the rate limit. Wait 60s and repair the rest.`);
     }
   };
 
@@ -485,9 +548,8 @@ export default function PreviewPage() {
         {/* Validation banner */}
         {validation && (
           <div className="max-w-5xl mx-auto mb-4 no-print">
-            <button
-              onClick={() => setShowValidation(v => !v)}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-lg text-sm font-medium shadow-sm transition-colors ${
+            <div
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium shadow-sm transition-colors ${
                 validation.errorCount > 0
                   ? 'bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400'
                   : validation.warningCount > 0
@@ -495,40 +557,76 @@ export default function PreviewPage() {
                     : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
               }`}
             >
-              <span className="flex items-center gap-2">
+              <button
+                onClick={() => setShowValidation(v => !v)}
+                className="flex items-center gap-2 flex-1 text-left"
+              >
                 {validation.errorCount > 0 || validation.warningCount > 0
-                  ? <AlertTriangle className="w-4 h-4" />
-                  : <ShieldCheck className="w-4 h-4" />}
-                {validation.errorCount === 0 && validation.warningCount === 0
-                  ? `Quality check passed — all ${validation.totalChecked} questions look good.`
-                  : `Quality check: ${validation.errorCount} error${validation.errorCount !== 1 ? 's' : ''}, ${validation.warningCount} warning${validation.warningCount !== 1 ? 's' : ''} across ${validation.totalChecked} questions.`}
-              </span>
-              {validation.issues.length > 0 && (
-                <ChevronDown className={`w-4 h-4 transition-transform ${showValidation ? 'rotate-180' : ''}`} />
+                  ? <AlertTriangle className="w-4 h-4 shrink-0" />
+                  : <ShieldCheck className="w-4 h-4 shrink-0" />}
+                <span>
+                  {validation.errorCount === 0 && validation.warningCount === 0
+                    ? `Quality check passed — all ${validation.totalChecked} questions look good.`
+                    : `Quality check: ${validation.errorCount} error${validation.errorCount !== 1 ? 's' : ''}, ${validation.warningCount} warning${validation.warningCount !== 1 ? 's' : ''} across ${validation.totalChecked} questions.`}
+                </span>
+                {validation.issues.length > 0 && (
+                  <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${showValidation ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+
+              {validation.issues.length > 0 && papers.length === 1 && (
+                <button
+                  onClick={handleAutoRepair}
+                  disabled={isRepairing || regenCooldown > 0}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-brand-gold text-white hover:bg-brand-gold-light transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Automatically regenerate all flagged questions"
+                >
+                  {isRepairing
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Repairing {repairProgress?.done}/{repairProgress?.total}</>
+                    : regenCooldown > 0
+                      ? <><Wrench className="w-3.5 h-3.5" /> Wait {regenCooldown}s</>
+                      : <><Wrench className="w-3.5 h-3.5" /> Auto-Repair</>}
+                </button>
               )}
-            </button>
+            </div>
 
             {showValidation && validation.issues.length > 0 && (
               <div className="mt-2 rounded-lg border border-brand-border bg-brand-card divide-y divide-brand-border/60 overflow-hidden">
-                {validation.issues.map((issue, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => scrollToQuestion(issue.qNum)}
-                    className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-brand-border/30 transition-colors"
-                  >
-                    <span className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                      issue.severity === 'error'
-                        ? 'bg-red-500/15 text-red-600 dark:text-red-400'
-                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                    }`}>
-                      {issue.severity}
-                    </span>
-                    <span className="shrink-0 text-xs font-bold text-foreground">Q{issue.qNum}</span>
-                    <span className="text-xs text-brand-muted flex-1">
-                      <span className="text-foreground-soft">{issue.category}</span> — {issue.message}
-                    </span>
-                  </button>
-                ))}
+                {papers.length > 1 && (
+                  <div className="px-4 py-2 text-[11px] text-brand-muted bg-brand-border/20">
+                    Question numbers refer to the base ordering. Jump-to and Auto-Repair are available for single-set papers.
+                  </div>
+                )}
+                {validation.issues.map((issue, idx) => {
+                  const inner = (
+                    <>
+                      <span className={`shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                        issue.severity === 'error'
+                          ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {issue.severity}
+                      </span>
+                      <span className="shrink-0 text-xs font-bold text-foreground">Q{issue.qNum}</span>
+                      <span className="text-xs text-brand-muted flex-1">
+                        <span className="text-foreground-soft">{issue.category}</span> — {issue.message}
+                      </span>
+                    </>
+                  );
+                  return papers.length === 1 ? (
+                    <button
+                      key={idx}
+                      onClick={() => scrollToQuestion(issue.qNum)}
+                      className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-brand-border/30 transition-colors"
+                    >
+                      {inner}
+                    </button>
+                  ) : (
+                    <div key={idx} className="w-full flex items-start gap-3 px-4 py-2.5 text-left">
+                      {inner}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

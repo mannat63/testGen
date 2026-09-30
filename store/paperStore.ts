@@ -28,6 +28,7 @@ interface PaperState {
   lastUsedConfig: PaperConfig | null;
   setPapers: (htmls: string[], config: PaperConfig, answerKeys?: string[], validation?: ValidationReport | null) => void;
   setPaper: (html: string, config: PaperConfig) => void;
+  setValidation: (validation: ValidationReport | null) => void;
   clearPaper: () => void;
   resetConfig: () => void;
 }
@@ -55,6 +56,7 @@ export const usePaperStore = create<PaperState>((set) => ({
     config,
     lastUsedConfig: config,
   }),
+  setValidation: (validation) => set({ validation }),
   clearPaper: () => set({
     generatedPapers: [],
     answerKeys: [],
