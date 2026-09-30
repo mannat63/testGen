@@ -9,6 +9,7 @@ import { getTemplateModel } from '@/models/Template';
 import { getGenerationLogModel } from '@/models/GenerationLog';
 import { getAllowedUserModel } from '@/models/AllowedUser';
 import { getQuestionBankModel } from '@/models/QuestionBank';
+import { getQuestionBankStats } from '@/lib/questionBankStats';
 
 /* ────────────────────────────────────────────────
    Helpers
@@ -151,9 +152,11 @@ export default async function Home() {
       teacherSparkline = teacherDays.map(s => s.size);
 
       try {
-        const QB = await getQuestionBankModel();
-        questionBankSize = await QB.countDocuments();
-      } catch { /* QB optional */ }
+        const stats = await getQuestionBankStats();
+        questionBankSize = stats.totalQuestions;
+      } catch (e) {
+        console.error('[Dashboard] Error fetching QB stats:', e);
+      }
     }
   } catch { /* DB not ready */ }
 
@@ -211,6 +214,7 @@ export default async function Home() {
       sub: 'verified questions',
       change: 0,
       spark: [],
+      href: '/question-bank',
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
@@ -334,8 +338,8 @@ export default async function Home() {
           {kpis.map((k: any) => {
             const sparkPath = buildSparklinePath(k.spark);
             const trendUp = k.change >= 0;
-            return (
-              <div key={k.label} className={`kpi-card relative overflow-hidden ${k.highlight ? 'border-accent/40 bg-accent-soft/30' : ''}`}>
+            const content = (
+              <>
                 <div className="flex items-start justify-between mb-3">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${k.highlight ? 'bg-accent text-white' : 'bg-accent-soft text-accent'}`}>
                     {k.icon}
@@ -343,14 +347,14 @@ export default async function Home() {
                   {k.spark.length > 0 && (
                     <svg width="80" height="24" viewBox="0 0 80 24" className="text-accent opacity-70">
                       <defs>
-                        <linearGradient id={`grad-${k.label}`} x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id={`grad-${k.label.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="currentColor" stopOpacity="0.20" />
                           <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
                         </linearGradient>
                       </defs>
                       {sparkPath && (
                         <>
-                          <path d={`${sparkPath} L80,24 L0,24 Z`} fill={`url(#grad-${k.label})`} />
+                          <path d={`${sparkPath} L80,24 L0,24 Z`} fill={`url(#grad-${k.label.replace(/\s+/g, '-')})`} />
                           <path d={sparkPath} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                         </>
                       )}
@@ -385,8 +389,15 @@ export default async function Home() {
                     <div className="text-[10px] text-foreground-soft mt-1 text-right">{k.tokenPct}% of 500K daily limit</div>
                   </div>
                 )}
-              </div>
+              </>
             );
+
+            const className = `kpi-card relative overflow-hidden ${k.highlight ? 'border-accent/40 bg-accent-soft/30' : ''} ${k.href ? 'hover:border-accent/60 transition-colors cursor-pointer block' : ''}`;
+
+            if (k.href) {
+              return <Link key={k.label} href={k.href} className={className}>{content}</Link>;
+            }
+            return <div key={k.label} className={className}>{content}</div>;
           })}
         </section>
 

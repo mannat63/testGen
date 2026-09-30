@@ -26,7 +26,7 @@ const SUBJECT_ALIASES: Record<string, string[]> = {
 };
 
 const TYPE_PATTERNS: Record<string, RegExp> = {
-  mcq:              /^(mcq|multiple.?choice|objective)$/i,
+  mcq:              /^(mcq|msq|multiple.?choice|multiple.?select|objective)$/i,
   sa1:              /^(short.?answer|sa[12]?|vsa|very.?short|subjective_2m|subjective_1m)$/i,
   sa2:              /^(short.?answer|sa[12]?|short.?answer.?ii|subjective_3m)$/i,
   la:               /^(long.?answer|la|essay|descriptive|subjective_4m|subjective_5m|subjective_6m|subjective)$/i,
@@ -130,15 +130,17 @@ async function fetchFromCommonDB(
   const result = new Map<number, SourcedQuestion>();
   if (maxCount <= 0 || slots.length === 0) return result;
 
+  const subjectPrefix = subject.toLowerCase().substring(0, 4);
+  const collectionName = `${board.toLowerCase()}_${subjectPrefix}`;
+
   let model: any;
   try {
-    model = await getCommonDBModel();
+    model = await getCommonDBModel(collectionName);
   } catch (e) {
     console.error('[CommonDB] connect error:', e);
     return result;
   }
 
-  // Build a simple, broad query: just board + subject
   const subjectAliases = SUBJECT_ALIASES[subject] || [subject.toLowerCase()];
   const subjectRegex = subjectAliases.join('|');
 
@@ -149,7 +151,7 @@ async function fetchFromCommonDB(
       subject: { $regex: subjectRegex, $options: 'i' },
     }).lean();
 
-    console.log(`[CommonDB] Loaded ${allDocs.length} docs for ${board}/${subject}`);
+    console.log(`[CommonDB] Loaded ${allDocs.length} docs for ${board}/${subject} from ${collectionName}`);
   } catch (e) {
     console.error('[CommonDB] query error:', e);
     return result;
@@ -189,14 +191,10 @@ async function fetchFromCommonDB(
     groups.get(key)!.indices.push(i);
   }
 
-  let filled = 0;
+  // Pre-calculate scored lists for each group
+  const groupQueues: { group: any; items: any[]; pointer: number }[] = [];
 
   for (const [, group] of groups) {
-    if (filled >= maxCount) break;
-    const unfilled = group.indices.filter(i => !result.has(i));
-    if (unfilled.length === 0) continue;
-    const needed = Math.min(unfilled.length, maxCount - filled);
-
     // Score each normalized doc for this group
     const scored = normalized
       .map(item => {
@@ -216,7 +214,8 @@ async function fetchFromCommonDB(
         }
 
         // Difficulty match bonus
-        const slotDiff = slots[unfilled[0]]?.difficulty || 'medium';
+        const unfilled = group.indices.filter(i => !result.has(i));
+        const slotDiff = unfilled.length > 0 ? slots[unfilled[0]]?.difficulty || 'medium' : 'medium';
         if (item.norm.difficulty === slotDiff) score += 10;
 
         return { ...item, score };
@@ -240,24 +239,49 @@ async function fetchFromCommonDB(
       }
       shuffled.push(...tierItems);
     }
+    
+    groupQueues.push({ group, items: shuffled, pointer: 0 });
+  }
 
-    let qi = 0;
-    for (const slotIdx of unfilled) {
-      if (qi >= shuffled.length || filled >= maxCount) break;
-      const { norm, docId } = shuffled[qi++];
+  // Round-robin distribution across groups to ensure even spread across sections
+  let filled = 0;
+  let madeProgress = true;
 
-      let text = norm.questionText.trim();
-      if (norm.options.length > 0) {
-        const labels = ['(a)', '(b)', '(c)', '(d)'];
-        text += '\n' + norm.options
-          .map((opt, i) => `${labels[i] ?? `(${String.fromCharCode(97 + i)})`} ${opt}`)
-          .join('\n');
+  // Shuffle group order so we don't always favor the first groups
+  for (let i = groupQueues.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [groupQueues[i], groupQueues[j]] = [groupQueues[j], groupQueues[i]];
+  }
+
+  while (filled < maxCount && madeProgress) {
+    madeProgress = false;
+    for (const queue of groupQueues) {
+      if (filled >= maxCount) break;
+
+      const unfilled = queue.group.indices.filter((i: number) => !result.has(i));
+      if (unfilled.length === 0) continue;
+
+      let assigned = false;
+      while (queue.pointer < queue.items.length && !assigned) {
+        const item = queue.items[queue.pointer++];
+        if (!seenIds.has(item.docId)) {
+          const slotIdx = unfilled[0];
+          let text = item.norm.questionText.trim();
+          if (item.norm.options.length > 0) {
+            const labels = ['(a)', '(b)', '(c)', '(d)'];
+            text += '\n' + item.norm.options
+              .map((opt: string, i: number) => `${labels[i] ?? `(${String.fromCharCode(97 + i)})`} ${opt}`)
+              .join('\n');
+          }
+          if (text) {
+            if (item.docId) seenIds.add(item.docId);
+            result.set(slotIdx, { text, source: 'Question Bank' });
+            filled++;
+            assigned = true;
+            madeProgress = true;
+          }
+        }
       }
-      if (!text) continue;
-
-      if (docId) seenIds.add(docId);
-      result.set(slotIdx, { text, source: 'Question Bank' });
-      filled++;
     }
   }
 
@@ -278,7 +302,9 @@ export async function fetchReferenceQuestions(
   const refs = new Map<string, { question: string; type: string; difficulty: string }[]>();
 
   try {
-    const model = await getCommonDBModel();
+    const subjectPrefix = subject.toLowerCase().substring(0, 4);
+    const collectionName = `${board.toLowerCase()}_${subjectPrefix}`;
+    const model = await getCommonDBModel(collectionName);
     const subjectAliases = SUBJECT_ALIASES[subject] || [subject.toLowerCase()];
 
     const allDocs = await model.find({

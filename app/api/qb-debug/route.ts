@@ -1,16 +1,14 @@
 import { NextResponse } from 'next/server';
-import mongoose from 'mongoose';
-import dbConnect from '@/lib/mongodb';
+import { commonDbConnect } from '@/lib/commonDbConnect';
 
 export async function GET(req: Request) {
   try {
-    await dbConnect();
-    const db = mongoose.connection.db;
+    const conn = await commonDbConnect();
+    const db = conn.db;
     if (!db) return NextResponse.json({ error: 'No DB connection' }, { status: 500 });
 
-    // List ALL collections so we can find the right name
     const collections = await db.listCollections().toArray();
-    const collectionNames = collections.map(c => c.name).sort();
+    const collectionNames = collections.map((c: any) => c.name).sort();
 
     const { searchParams } = new URL(req.url);
     const collName = searchParams.get('collection');

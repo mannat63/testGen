@@ -98,7 +98,13 @@ function distributeToChapters(
   let assigned = rawCounts.reduce((s, r) => s + r.count, 0);
   const remainders = rawCounts
     .map((r, i) => ({ index: i, remainder: r.raw - r.count }))
-    .sort((a, b) => b.remainder - a.remainder);
+    .sort((a, b) => {
+      // Small random jitter to break ties (0.01 precision difference is considered a tie)
+      if (Math.abs(b.remainder - a.remainder) < 0.01) {
+        return Math.random() - 0.5;
+      }
+      return b.remainder - a.remainder;
+    });
 
   let idx = 0;
   while (assigned < totalCount) {

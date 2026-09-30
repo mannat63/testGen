@@ -1,18 +1,17 @@
-import mongoose from 'mongoose';
-import dbConnect from '@/lib/mongodb';
+import mongoose, { Connection } from 'mongoose';
+import { commonDbConnect } from '@/lib/commonDbConnect';
 
 const CommonDBSchema = new mongoose.Schema({}, {
   timestamps: false,
   strict: false,
 });
 
-export async function getCommonDBModel(): Promise<mongoose.Model<any>> {
-  await dbConnect();
-  if (mongoose.models.CommonDB) {
-    delete (mongoose.models as any).CommonDB;
+export async function getCommonDBModel(collectionName: string = 'question_bank'): Promise<mongoose.Model<any>> {
+  const conn: Connection = await commonDbConnect();
+  
+  if (conn.models.CommonDB) {
+    delete (conn.models as any).CommonDB;
   }
-  if (mongoose.connection.models.CommonDB) {
-    delete (mongoose.connection.models as any).CommonDB;
-  }
-  return mongoose.model('CommonDB', CommonDBSchema, 'question_bank');
+  
+  return conn.model('CommonDB', CommonDBSchema, collectionName);
 }
