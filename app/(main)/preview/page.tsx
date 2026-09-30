@@ -6,6 +6,7 @@ import { usePaperStore } from '@/store/paperStore';
 import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, ChevronUp, RefreshCw, BookOpen, ShieldCheck, AlertTriangle, ChevronDown, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { validateSingleQuestion, buildValidationReport } from '@/lib/validatePaper';
 
 interface SectionInfo {
   id: string;
@@ -190,22 +191,25 @@ export default function PreviewPage() {
   };
 
   // Core regeneration: reads slot data from DOM, calls the API, replaces the
-  // question in place. Returns a status. No cooldown/scroll/highlight side effects
-  // so it can be reused by both manual regen and batch auto-repair.
-  const regenerateQuestionInPlace = async (qNum: number): Promise<'ok' | 'ratelimit' | 'notfound' | 'error'> => {
-    if (!paperRef.current || !config) return 'error';
+  // question in place. Returns status + the new text and slot info (for
+  // re-validation). No cooldown/scroll/highlight side effects so it can be
+  // reused by both manual regen and batch auto-repair.
+  const regenerateQuestionInPlace = async (
+    qNum: number,
+  ): Promise<{ status: 'ok' | 'ratelimit' | 'notfound' | 'error'; text?: string; slotInfo?: any }> => {
+    if (!paperRef.current || !config) return { status: 'error' };
 
     const qEl = paperRef.current.querySelector(`#paper-q-${qNum}`);
-    if (!qEl) return 'notfound';
+    if (!qEl) return { status: 'notfound' };
 
     const slotDataAttr = qEl.getAttribute('data-slot');
-    if (!slotDataAttr) return 'notfound';
+    if (!slotDataAttr) return { status: 'notfound' };
 
     let slotInfo: any;
     try {
       slotInfo = JSON.parse(slotDataAttr);
     } catch {
-      return 'error';
+      return { status: 'error' };
     }
 
     try {
@@ -225,12 +229,12 @@ export default function PreviewPage() {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        if (res.status === 429 || errData.error?.includes('rate')) return 'ratelimit';
-        return 'error';
+        if (res.status === 429 || errData.error?.includes('rate')) return { status: 'ratelimit' };
+        return { status: 'error' };
       }
 
       const { question } = await res.json();
-      if (!question) return 'error';
+      if (!question) return { status: 'error' };
 
       const { main, options } = splitQuestionAndOptions(question);
       const font = "'Calibri', 'Arial', sans-serif";
@@ -250,11 +254,25 @@ export default function PreviewPage() {
         </div>
         ${optionsHtml}
       `;
-      return 'ok';
+      // Reconstruct text in the same shape validateSingleQuestion expects
+      const reconstructed = [main, ...options].join('\n');
+      return { status: 'ok', text: reconstructed, slotInfo };
     } catch {
-      return 'error';
+      return { status: 'error' };
     }
   };
+
+  // Re-run per-question structural checks on a freshly regenerated question.
+  const revalidateOne = (qNum: number, text: string, slotInfo: any) =>
+    validateSingleQuestion({
+      qNum,
+      text,
+      questionType: slotInfo?.questionType || '',
+      chapterName: slotInfo?.chapterName || '',
+      difficulty: slotInfo?.difficulty || '',
+      marksEach: slotInfo?.marksEach || 0,
+      source: 'AI Generated',
+    });
 
   const handleRegenerateQuestion = async (qNum: number) => {
     if (!paperRef.current || !config || regenCooldown > 0) return;
@@ -267,12 +285,18 @@ export default function PreviewPage() {
     setRegenLoading(qNum);
     scrollToQuestion(qNum);
     try {
-      const status = await regenerateQuestionInPlace(qNum);
+      const { status, text, slotInfo } = await regenerateQuestionInPlace(qNum);
       if (status === 'ratelimit') {
         startCooldown();
         alert('Rate limit reached. Please wait 60 seconds.');
       } else if (status === 'ok') {
-        highlightQuestion(qEl, '#10b981');
+        // Re-validate the regenerated question and update the report honestly.
+        const fresh = revalidateOne(qNum, text || '', slotInfo);
+        if (validation) {
+          const others = validation.issues.filter(i => i.qNum !== qNum);
+          setValidation(buildValidationReport([...others, ...fresh], validation.totalChecked));
+        }
+        highlightQuestion(qEl, fresh.length === 0 ? '#10b981' : '#f59e0b');
         startCooldown();
       } else {
         alert(`Failed to regenerate Q${qNum}. Please try again.`);
@@ -294,40 +318,39 @@ export default function PreviewPage() {
 
     setIsRepairing(true);
     setRepairProgress({ done: 0, total: toRepair.length });
-    const repaired: number[] = [];
+
+    // Work on a local copy to avoid stale-closure over `validation` across the loop.
+    let workingIssues = [...validation.issues];
+    let repairedCount = 0;
+    let stillBrokenCount = 0;
     let hitRateLimit = false;
 
     for (let idx = 0; idx < toRepair.length; idx++) {
       const qNum = toRepair[idx];
       scrollToQuestion(qNum);
-      const status = await regenerateQuestionInPlace(qNum);
+      const { status, text, slotInfo } = await regenerateQuestionInPlace(qNum);
       if (status === 'ratelimit') { hitRateLimit = true; break; }
       if (status === 'ok') {
-        repaired.push(qNum);
+        // Re-validate the freshly generated question rather than assuming it's fixed.
+        const fresh = revalidateOne(qNum, text || '', slotInfo);
+        workingIssues = workingIssues.filter(i => i.qNum !== qNum).concat(fresh);
+        if (fresh.length === 0) repairedCount++; else stillBrokenCount++;
         const qEl = paperRef.current?.querySelector(`#paper-q-${qNum}`);
-        if (qEl) highlightQuestion(qEl, '#10b981');
+        if (qEl) highlightQuestion(qEl, fresh.length === 0 ? '#10b981' : '#f59e0b');
       }
       setRepairProgress({ done: idx + 1, total: toRepair.length });
       if (idx < toRepair.length - 1) await new Promise(r => setTimeout(r, AUTO_REPAIR_DELAY_MS));
     }
 
-    // Clear repaired issues from the validation report.
-    if (repaired.length > 0) {
-      const remaining = validation.issues.filter(i => !repaired.includes(i.qNum));
-      setValidation({
-        ...validation,
-        issues: remaining,
-        errorCount: remaining.filter(i => i.severity === 'error').length,
-        warningCount: remaining.filter(i => i.severity === 'warning').length,
-        passed: remaining.filter(i => i.severity === 'error').length === 0,
-      });
-    }
+    setValidation(buildValidationReport(workingIssues, validation.totalChecked));
 
     setIsRepairing(false);
     setRepairProgress(null);
     if (hitRateLimit) {
       startCooldown();
-      alert(`Repaired ${repaired.length} question(s), then hit the rate limit. Wait 60s and repair the rest.`);
+      alert(`Fixed ${repairedCount} question(s) before hitting the rate limit. Wait 60s and repair the rest.`);
+    } else if (stillBrokenCount > 0) {
+      alert(`Fixed ${repairedCount} question(s). ${stillBrokenCount} still have issues after regeneration — try Auto-Repair again or edit them manually.`);
     }
   };
 

@@ -1,4 +1,4 @@
-import { PromptConfig } from './generatePrompt';
+import type { PromptConfig } from './generatePrompt';
 
 export interface ValidationIssue {
   qNum: number;
@@ -55,6 +55,87 @@ function jaccardSimilarity(a: string, b: string): number {
 }
 
 /**
+ * Per-question structural checks — no cross-paper context needed.
+ * Reusable for re-validation of a single question after repair/regeneration.
+ * Does NOT include duplicate detection (that needs the whole paper).
+ */
+export function validateSingleQuestion(q: ValidationInput): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const text = (q.text || '').trim();
+  const lowerText = text.toLowerCase();
+
+  // Empty or fallback placeholder
+  if (!text || FALLBACK_MARKERS.some(marker => lowerText.includes(marker))) {
+    issues.push({
+      qNum: q.qNum,
+      severity: 'error',
+      category: 'missing',
+      message: 'Question text is empty or failed to generate.',
+    });
+    return issues;
+  }
+
+  // Too short to be a real question
+  if (text.length < 10) {
+    issues.push({
+      qNum: q.qNum,
+      severity: 'error',
+      category: 'too-short',
+      message: 'Question text is suspiciously short.',
+    });
+  }
+
+  // MCQ / Assertion-Reason must have options
+  if (CHOICE_TYPES.has(q.questionType)) {
+    const options = extractOptions(text);
+    if (options.length < 2) {
+      issues.push({
+        qNum: q.qNum,
+        severity: 'error',
+        category: 'missing-options',
+        message: `${q.questionType.toUpperCase()} has ${options.length} option(s); expected 4.`,
+      });
+    } else if (options.length < 4) {
+      issues.push({
+        qNum: q.qNum,
+        severity: 'warning',
+        category: 'few-options',
+        message: `${q.questionType.toUpperCase()} has only ${options.length} options (expected 4).`,
+      });
+    }
+
+    // Duplicate option text
+    const optTexts = options.map(o => o.replace(/^(\([a-dA-D]\)|[a-dA-D][\.\)])\s*/, '').trim().toLowerCase());
+    const seen = new Set<string>();
+    let hasDup = false;
+    for (const ot of optTexts) {
+      if (ot && seen.has(ot)) hasDup = true;
+      seen.add(ot);
+    }
+    if (hasDup) {
+      issues.push({
+        qNum: q.qNum,
+        severity: 'error',
+        category: 'duplicate-options',
+        message: 'Two or more answer options are identical.',
+      });
+    }
+  }
+
+  // Numerical questions should contain at least one number
+  if (q.questionType === 'numerical' && !/\d/.test(text)) {
+    issues.push({
+      qNum: q.qNum,
+      severity: 'warning',
+      category: 'numerical-no-number',
+      message: 'Numerical question contains no numeric values.',
+    });
+  }
+
+  return issues;
+}
+
+/**
  * Deterministic structural validation — no LLM, fast, reliable.
  * Catches empty questions, malformed MCQs, duplicate options,
  * near-duplicate questions across the paper, and broken numericals.
@@ -64,77 +145,12 @@ export function validateStructure(questions: ValidationInput[]): ValidationIssue
   const normalizedTexts: { qNum: number; norm: string }[] = [];
 
   for (const q of questions) {
+    issues.push(...validateSingleQuestion(q));
+
     const text = (q.text || '').trim();
     const lowerText = text.toLowerCase();
-
-    // Empty or fallback placeholder
-    if (!text || FALLBACK_MARKERS.some(marker => lowerText.includes(marker))) {
-      issues.push({
-        qNum: q.qNum,
-        severity: 'error',
-        category: 'missing',
-        message: 'Question text is empty or failed to generate.',
-      });
-      continue;
-    }
-
-    // Too short to be a real question
-    if (text.length < 10) {
-      issues.push({
-        qNum: q.qNum,
-        severity: 'error',
-        category: 'too-short',
-        message: 'Question text is suspiciously short.',
-      });
-    }
-
-    // MCQ / Assertion-Reason must have options
-    if (CHOICE_TYPES.has(q.questionType)) {
-      const options = extractOptions(text);
-      if (options.length < 2) {
-        issues.push({
-          qNum: q.qNum,
-          severity: 'error',
-          category: 'missing-options',
-          message: `${q.questionType.toUpperCase()} has ${options.length} option(s); expected 4.`,
-        });
-      } else if (options.length < 4) {
-        issues.push({
-          qNum: q.qNum,
-          severity: 'warning',
-          category: 'few-options',
-          message: `${q.questionType.toUpperCase()} has only ${options.length} options (expected 4).`,
-        });
-      }
-
-      // Duplicate option text
-      const optTexts = options.map(o => o.replace(/^(\([a-dA-D]\)|[a-dA-D][\.\)])\s*/, '').trim().toLowerCase());
-      const seen = new Set<string>();
-      let hasDup = false;
-      for (const ot of optTexts) {
-        if (ot && seen.has(ot)) hasDup = true;
-        seen.add(ot);
-      }
-      if (hasDup) {
-        issues.push({
-          qNum: q.qNum,
-          severity: 'error',
-          category: 'duplicate-options',
-          message: 'Two or more answer options are identical.',
-        });
-      }
-    }
-
-    // Numerical questions should contain at least one number
-    if (q.questionType === 'numerical' && !/\d/.test(text)) {
-      issues.push({
-        qNum: q.qNum,
-        severity: 'warning',
-        category: 'numerical-no-number',
-        message: 'Numerical question contains no numeric values.',
-      });
-    }
-
+    // Skip duplicate indexing for empty/fallback questions (already flagged above)
+    if (!text || FALLBACK_MARKERS.some(marker => lowerText.includes(marker))) continue;
     normalizedTexts.push({ qNum: q.qNum, norm: normalizeForCompare(text) });
   }
 
