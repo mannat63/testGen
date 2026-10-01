@@ -7,6 +7,7 @@ import { ArrowLeft, Download, RotateCcw, FileText, Pencil, Loader2, Settings2, C
 import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { validateSingleQuestion, buildValidationReport } from '@/lib/validatePaper';
+import { splitQuestionAndOptions, renderQuestionInner } from '@/lib/formatPaper';
 
 interface SectionInfo {
   id: string;
@@ -237,23 +238,10 @@ export default function PreviewPage() {
       if (!question) return { status: 'error' };
 
       const { main, options } = splitQuestionAndOptions(question);
-      const font = "'Calibri', 'Arial', sans-serif";
+      // Reuse the shared renderer so regenerated questions match the paper exactly
+      // (math formatting, option alignment, badge, marks).
+      qEl.innerHTML = renderQuestionInner(qNum, main, options, slotInfo.marksEach, 'AI Generated', true);
 
-      const optionsHtml = options.length > 0
-        ? `<div style="margin:8px 0 8px 32px;display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:6px;">
-            ${options.map(opt => `<div style="font-size:14px;font-family:${font};color:#374151;line-height:1.5;">${escHtml(opt)}</div>`).join('')}
-           </div>`
-        : '';
-
-      qEl.innerHTML = `
-        <div style="display:flex;align-items:flex-start;gap:8px;">
-          <div style="font-size:15px;font-family:${font};color:#111827;font-weight:700;padding-top:2px;white-space:nowrap;">Q${qNum}.</div>
-          <div style="font-size:15px;font-family:${font};color:#111827;line-height:1.7;flex-grow:1;">
-            ${escHtml(main)} <span class="source-badge" style="font-size:9px;padding:2px 6px;border-radius:4px;background:#f3f4f6;color:#6b7280;font-weight:700;vertical-align:middle;margin:0 6px;">AI</span> <span style="color:#6b7280;font-weight:700;font-size:13px;white-space:nowrap;">[${slotInfo.marksEach} m]</span>
-          </div>
-        </div>
-        ${optionsHtml}
-      `;
       // Reconstruct text in the same shape validateSingleQuestion expects
       const reconstructed = [main, ...options].join('\n');
       return { status: 'ok', text: reconstructed, slotInfo };
@@ -366,7 +354,8 @@ export default function PreviewPage() {
     if (!paperRef.current) return;
     const clone = paperRef.current.cloneNode(true) as HTMLElement;
     clone.querySelectorAll('.source-legend, .source-badge').forEach(el => el.remove());
-    
+    flattenMathForWord(clone);
+
     const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Test Paper</title></head><body>";
     const footer = "</body></html>";
     const src = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(header + clone.innerHTML + footer);
@@ -404,9 +393,12 @@ export default function PreviewPage() {
   const handleDownloadAnswerKey = () => {
     const akHtml = answerKeys?.[activeSet];
     if (!akHtml) return;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = akHtml;
+    flattenMathForWord(tmp);
     const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Answer Key</title></head><body>";
     const footer = "</body></html>";
-    const src = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(header + akHtml + footer);
+    const src = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(header + tmp.innerHTML + footer);
     const a = document.createElement("a");
     document.body.appendChild(a);
     a.href = src;
@@ -696,27 +688,15 @@ export default function PreviewPage() {
   );
 }
 
-function splitQuestionAndOptions(text: string): { main: string; options: string[] } {
-  const rawLines = text.split('\n').map(l => l.trim()).filter(l => l);
-  const options: string[] = [];
-  const mainLines: string[] = [];
-
-  for (const line of rawLines) {
-    if (/^(\([a-dA-D]\)|[a-dA-D]\.)\s/.test(line)) {
-      options.push(line);
-    } else {
-      mainLines.push(line);
-    }
-  }
-
-  return { main: mainLines.join(' ').trim(), options };
+// Word cannot render the inline-block stacked fractions, so for DOC export we
+// flatten each one to an inline "(num)/(den)" that renders cleanly everywhere.
+function flattenMathForWord(root: HTMLElement) {
+  root.querySelectorAll('.math-frac').forEach(el => {
+    const spans = el.querySelectorAll(':scope > span');
+    const num = (spans[0]?.textContent || '').trim();
+    const den = (spans[1]?.textContent || '').trim();
+    const wrap = (t: string) => (/[\s+\-×·/=]/.test(t) ? `(${t})` : t);
+    el.replaceWith(document.createTextNode(`${wrap(num)}/${wrap(den)}`));
+  });
 }
 
-function escHtml(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}

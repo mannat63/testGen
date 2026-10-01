@@ -1,6 +1,93 @@
-import { PaperPlan } from './paperAlgorithm';
-import { PromptConfig } from './generatePrompt';
-import { SourcedQuestion } from './questionSource';
+import type { PaperPlan } from './paperAlgorithm';
+import type { PromptConfig } from './generatePrompt';
+import type { SourcedQuestion } from './questionSource';
+
+/* ──────────────────────────────────────────────────────────────
+   Scientific / LaTeX normalization
+   Converts LLM math syntax into clean inline-styled HTML that
+   renders identically in the browser preview, PDF (html2canvas)
+   and Word DOC export. No external renderer, no web fonts.
+   ────────────────────────────────────────────────────────────── */
+
+// Longer / variant keys first so partial matches don't clash.
+const MATH_SYMBOLS: [string, string][] = [
+  ['\\varepsilon', 'ε'], ['\\epsilon', 'ε'], ['\\vartheta', 'ϑ'], ['\\varphi', 'φ'],
+  ['\\Omega', 'Ω'], ['\\omega', 'ω'], ['\\Delta', 'Δ'], ['\\delta', 'δ'],
+  ['\\Gamma', 'Γ'], ['\\gamma', 'γ'], ['\\Lambda', 'Λ'], ['\\lambda', 'λ'],
+  ['\\Sigma', 'Σ'], ['\\sigma', 'σ'], ['\\Theta', 'Θ'], ['\\theta', 'θ'],
+  ['\\Phi', 'Φ'], ['\\phi', 'φ'], ['\\Psi', 'Ψ'], ['\\psi', 'ψ'],
+  ['\\Pi', 'Π'], ['\\pi', 'π'], ['\\alpha', 'α'], ['\\beta', 'β'],
+  ['\\zeta', 'ζ'], ['\\eta', 'η'], ['\\iota', 'ι'], ['\\kappa', 'κ'],
+  ['\\mu', 'μ'], ['\\nu', 'ν'], ['\\xi', 'ξ'], ['\\rho', 'ρ'],
+  ['\\tau', 'τ'], ['\\upsilon', 'υ'], ['\\chi', 'χ'],
+  ['\\times', '×'], ['\\cdot', '·'], ['\\div', '÷'], ['\\pm', '±'], ['\\mp', '∓'],
+  ['\\leq', '≤'], ['\\le', '≤'], ['\\geq', '≥'], ['\\ge', '≥'],
+  ['\\neq', '≠'], ['\\ne', '≠'], ['\\approx', '≈'], ['\\equiv', '≡'],
+  ['\\propto', '∝'], ['\\infty', '∞'], ['\\partial', '∂'], ['\\nabla', '∇'],
+  ['\\int', '∫'], ['\\oint', '∮'], ['\\sum', 'Σ'], ['\\prod', '∏'],
+  ['\\Rightarrow', '⇒'], ['\\Leftarrow', '⇐'], ['\\leftrightarrow', '↔'],
+  ['\\rightarrow', '→'], ['\\leftarrow', '←'], ['\\to', '→'],
+  ['\\circ', '°'], ['\\degree', '°'], ['\\angle', '∠'], ['\\perp', '⊥'],
+  ['\\parallel', '∥'], ['\\hbar', 'ℏ'], ['\\ell', 'ℓ'], ['\\odot', '⊙'],
+  ['\\cdots', '⋯'], ['\\ldots', '…'], ['\\dots', '…'], ['\\prime', '′'],
+  ['\\pi', 'π'], ['\\%', '%'], ['\\&', '&amp;'], ['\\_', '_'], ['\\#', '#'],
+];
+
+function fracSpan(num: string, den: string): string {
+  return `<span class="math-frac" style="display:inline-block;vertical-align:-0.5em;text-align:center;margin:0 2px;font-size:0.92em;">` +
+    `<span style="display:block;line-height:1.3;border-bottom:1.3px solid currentColor;padding:0 4px;">${num}</span>` +
+    `<span style="display:block;line-height:1.3;padding:0 4px;">${den}</span></span>`;
+}
+
+// Operates on an already HTML-escaped string.
+function latexToHtml(input: string): string {
+  let s = input;
+
+  // Superscripts / subscripts (require a preceding token so normal prose is safe)
+  s = s.replace(/(?<=[\w)\]}])\^\{([^{}]*)\}/g, (_m, x) => `<sup>${x}</sup>`);
+  s = s.replace(/(?<=[\w)\]}])\^(\\?[A-Za-z0-9]+|[-+]?\d+)/g, (_m, x) => `<sup>${x}</sup>`);
+  s = s.replace(/(?<=[\w)\]}])_\{([^{}]*)\}/g, (_m, x) => `<sub>${x}</sub>`);
+  s = s.replace(/(?<=[\w)\]}])_(\\?[A-Za-z0-9]+)/g, (_m, x) => `<sub>${x}</sub>`);
+
+  // Named symbols (literal replace, order-sensitive list above)
+  for (const [k, v] of MATH_SYMBOLS) s = s.split(k).join(v);
+
+  // Fractions (two passes handle one level of nesting)
+  const fracRe = /\\d?frac\s*\{((?:[^{}]|\{[^{}]*\})*)\}\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+  for (let i = 0; i < 2; i++) s = s.replace(fracRe, (_m, n, d) => fracSpan(n.trim(), d.trim()));
+
+  // Roots, text, formatting wrappers, vectors
+  s = s.replace(/\\sqrt\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g,
+    (_m, x) => `√<span style="border-top:1.2px solid currentColor;padding:0 1px;">${x.trim()}</span>`);
+  s = s.replace(/\\(?:text|mathrm|operatorname|mathsf)\s*\{([^{}]*)\}/g,
+    (_m, x) => `<span style="font-style:normal;">${x}</span>`);
+  s = s.replace(/\\(?:mathbf|boldsymbol)\s*\{([^{}]*)\}/g, (_m, x) => `<strong>${x}</strong>`);
+  // Vectors/unit-vectors: use the boldface convention (renders cleanly in
+  // browser, PDF and Word; combining arrow/caret glyphs show as tofu in many fonts).
+  s = s.replace(/\\(?:vec|overrightarrow|hat)\s*\{([^{}]*)\}/g, (_m, x) => `<strong>${x}</strong>`);
+  s = s.replace(/\\(?:bar|overline)\s*\{([^{}]*)\}/g, (_m, x) => `<span style="text-decoration:overline;">${x}</span>`);
+
+  // Cleanup: spacing commands, line breaks, leftover unknown commands + braces
+  s = s.replace(/\\left|\\right|\\!|\\,|\\;|\\:|\\quad|\\qquad/g, ' ');
+  s = s.replace(/\\\\/g, ' ');
+  s = s.replace(/\\([a-zA-Z]+)\b/g, '$1'); // unknown command → drop the backslash
+  s = s.replace(/[{}]/g, '');
+  s = s.replace(/[ \t]{2,}/g, ' ');
+  return s;
+}
+
+/**
+ * Render question / option / answer text that may contain LaTeX math
+ * into safe, self-styled HTML. Strips $-delimiters and converts the math.
+ */
+export function formatScientific(input: string): string {
+  if (!input) return '';
+  let s = esc(input);                                  // HTML-escape literal text first
+  s = s.replace(/\$\$|\$|\\\(|\\\)|\\\[|\\\]/g, '');    // drop math delimiters
+  s = latexToHtml(s);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'); // markdown bold leakage
+  return s.trim();
+}
 
 export function parseAnswerKey(rawText: string, qNums: number[]): Map<number, string> {
   const answers = new Map<number, string>();
@@ -84,6 +171,55 @@ function getSourceStyle(source: string) {
   return { color: '#0f766e', bg: '#f0fdfa', label: source };
 }
 
+const PAPER_FONT = "'Calibri', 'Segoe UI', 'Arial', sans-serif";
+
+/**
+ * Inner HTML for a single question block (header row + options).
+ * Shared by buildPaperHtml and the client-side regenerate path so the
+ * layout stays identical everywhere. Uses tables for alignment because
+ * tables render consistently in the browser, PDF and Word.
+ */
+export function renderQuestionInner(
+  displayNum: number,
+  main: string,
+  options: string[],
+  marksEach: number,
+  source?: string,
+  showSource?: boolean,
+): string {
+  const f = PAPER_FONT;
+  let badge = '';
+  if (showSource && source) {
+    const st = getSourceStyle(source);
+    const label = st.label === source ? 'DB' : st.label;
+    badge = ` <span class="source-badge" style="font-size:9px;padding:1px 5px;border-radius:4px;background:${st.bg};color:${st.color};font-weight:700;vertical-align:middle;">${label}</span>`;
+  }
+
+  let h = '';
+  // Header row: Q# | question text | marks (right-aligned)
+  h += `<table style="width:100%;border-collapse:collapse;margin:0;"><tbody><tr>`;
+  h += `<td style="width:30px;vertical-align:top;font-size:15px;font-family:${f};font-weight:700;color:#111827;white-space:nowrap;padding:0;">Q${displayNum}.</td>`;
+  h += `<td style="vertical-align:top;font-size:15px;font-family:${f};color:#111827;line-height:1.8;padding:0 10px 0 0;">${formatScientific(main)}${badge}</td>`;
+  h += `<td style="width:52px;vertical-align:top;text-align:right;font-size:13px;font-family:${f};font-weight:700;color:#64748b;white-space:nowrap;padding:1px 0 0 0;">[${marksEach} m]</td>`;
+  h += `</tr></tbody></table>`;
+
+  // Options: consistent 2-column table, aligned under the question text
+  if (options.length > 0) {
+    h += `<table style="margin:7px 0 2px 30px;border-collapse:collapse;width:calc(100% - 30px);"><tbody>`;
+    for (let i = 0; i < options.length; i += 2) {
+      h += `<tr>`;
+      h += `<td style="width:50%;vertical-align:top;font-size:14px;font-family:${f};color:#374151;line-height:1.65;padding:3px 14px 3px 0;">${formatScientific(options[i])}</td>`;
+      h += options[i + 1]
+        ? `<td style="width:50%;vertical-align:top;font-size:14px;font-family:${f};color:#374151;line-height:1.65;padding:3px 0;">${formatScientific(options[i + 1])}</td>`
+        : `<td style="width:50%;padding:0;"></td>`;
+      h += `</tr>`;
+    }
+    h += `</tbody></table>`;
+  }
+
+  return h;
+}
+
 export function buildPaperHtml(
   plan: PaperPlan,
   questions: string[],
@@ -165,7 +301,6 @@ export function buildPaperHtml(
       const { main, options } = splitQuestionAndOptions(qText);
 
       const source: SourcedQuestion['source'] = sources?.[origIdx] ?? 'AI Generated';
-      const srcStyle = getSourceStyle(source);
 
       const slotData = JSON.stringify({
         chapterName: slot.chapterName,
@@ -175,26 +310,8 @@ export function buildPaperHtml(
         sectionName: slot.sectionName,
       });
 
-      lines.push(`<div class="pdf-no-break paper-question" id="paper-q-${displayNum}" data-slot='${escAttr(slotData)}' style="page-break-inside:avoid;margin:18px 0 10px 0;">`);
-      lines.push(`<div style="display:flex;align-items:flex-start;gap:8px;">`);
-      lines.push(`<div style="font-size:15px;font-family:${font};color:#111827;font-weight:700;padding-top:2px;white-space:nowrap;">Q${displayNum}.</div>`);
-      lines.push(`<div style="font-size:15px;font-family:${font};color:#111827;line-height:1.7;flex-grow:1;">`);
-
-      const srcBadge = showSources
-        ? ` <span class="source-badge" style="font-size:9px;padding:2px 6px;border-radius:4px;background:${srcStyle.bg};color:${srcStyle.color};font-weight:700;vertical-align:middle;margin:0 6px;">${srcStyle.label === source ? 'DB' : srcStyle.label}</span>`
-        : '';
-
-      lines.push(`${esc(main)}${srcBadge} <span style="color:#6b7280;font-weight:700;font-size:13px;white-space:nowrap;">[${slot.marksEach} m]</span>`);
-      lines.push(`</div></div>`);
-
-      if (options.length > 0) {
-        lines.push(`<div style="margin:8px 0 8px 32px;display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:6px;">`);
-        for (const opt of options) {
-          lines.push(`<div style="font-size:14px;font-family:${font};color:#374151;line-height:1.5;">${esc(opt)}</div>`);
-        }
-        lines.push(`</div>`);
-      }
-
+      lines.push(`<div class="pdf-no-break paper-question" id="paper-q-${displayNum}" data-slot='${escAttr(slotData)}' style="page-break-inside:avoid;margin:16px 0;">`);
+      lines.push(renderQuestionInner(displayNum, main, options, slot.marksEach, source, showSources));
       lines.push(`</div>`);
       displayNum++;
     }
@@ -207,7 +324,7 @@ export function buildPaperHtml(
   return lines.join('\n');
 }
 
-function splitQuestionAndOptions(text: string): { main: string; options: string[] } {
+export function splitQuestionAndOptions(text: string): { main: string; options: string[] } {
   const rawLines = text.split('\n').map(l => l.trim()).filter(l => l);
   const options: string[] = [];
   const mainLines: string[] = [];
@@ -289,7 +406,7 @@ export function buildAnswerKeyHtml(
     const sourceColor = a.source === 'Question Bank' ? '#1d4ed8' : '#6b7280';
     const sourceLabel = a.source === 'Question Bank' ? 'QB' : 'AI';
 
-    const answerHtml = esc(a.answer)
+    const answerHtml = formatScientific(a.answer)
       .replace(/\n- /g, '<br>• ')
       .replace(/\n/g, '<br>');
 
