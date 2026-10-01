@@ -11,6 +11,7 @@ import {
   validateStructure, buildValidationReport, buildSemanticValidationPrompt,
   parseSemanticValidation, ValidationInput, ValidationIssue,
 } from '@/lib/validatePaper';
+import { GROQ_GENERATION_MODEL, GROQ_LIGHTWEIGHT_MODEL } from '@/lib/aiModels';
 
 export const maxDuration = 180;
 
@@ -40,7 +41,7 @@ async function generateChunk(
     try {
       const completion = await groq.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
-        model: 'llama-3.1-8b-instant',
+        model: GROQ_GENERATION_MODEL,
         temperature: 0.7,
         max_tokens,
         top_p: 1,
@@ -189,7 +190,7 @@ export async function POST(req: Request) {
             const estimatedTokens = aiQuestionsForAnswers.length * 60;
             const completion = await groq.chat.completions.create({
               messages: [{ role: 'user', content: answerPrompt }],
-              model: 'llama-3.1-8b-instant',
+              model: GROQ_LIGHTWEIGHT_MODEL,
               temperature: 0.3,
               max_tokens: Math.min(Math.max(estimatedTokens, 400), 3000),
               top_p: 1,
@@ -241,7 +242,7 @@ export async function POST(req: Request) {
           const validationPrompt = buildSemanticValidationPrompt(config, aiToCheck);
           const completion = await groq.chat.completions.create({
             messages: [{ role: 'user', content: validationPrompt }],
-            model: 'llama-3.1-8b-instant',
+            model: GROQ_LIGHTWEIGHT_MODEL,
             temperature: 0.1,
             max_tokens: Math.min(Math.max(aiToCheck.length * 20, 200), 1500),
             top_p: 1,
