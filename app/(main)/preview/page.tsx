@@ -436,6 +436,7 @@ export default function PreviewPage() {
   };
 
   const btnBase = "inline-flex items-center px-4 py-2 rounded-lg text-sm font-bold transition-all duration-200 shadow-sm";
+  const btnSecondary = `${btnBase} bg-background border border-brand-border text-foreground hover:bg-brand-border/40`;
 
   return (
     <div className="min-h-screen flex flex-col transition-colors duration-300" style={{ background: 'var(--bg-gradient)' }}>
@@ -478,36 +479,40 @@ export default function PreviewPage() {
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Actions (tertiary, ghost) */}
             <button onClick={handleRegenerate} disabled={isRegenerating || regenCooldown > 0}
-              className={`${btnBase} bg-background border border-brand-border text-foreground hover:bg-brand-border/50 disabled:opacity-50`}>
+              className={`${btnSecondary} disabled:opacity-50`}>
               {isRegenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCcw className="mr-2 h-4 w-4" />}
               {isRegenerating ? 'Generating...' : regenCooldown > 0 ? `Wait ${regenCooldown}s` : 'Regenerate All'}
             </button>
-            <button onClick={handleBackToConfig}
-              className={`${btnBase} bg-background border border-brand-border text-foreground hover:bg-brand-border/50`}>
+            <button onClick={handleBackToConfig} className={btnSecondary}>
               <Settings2 className="mr-2 h-4 w-4" /> Edit Config
             </button>
-            <button onClick={handleDownloadDoc} className={`${btnBase} bg-blue-600 text-white hover:bg-blue-700`}>
+
+            <span className="hidden sm:block w-px h-6 bg-brand-border mx-1" aria-hidden />
+
+            {/* Exports (secondary neutral) */}
+            <button onClick={handleDownloadDoc} className={btnSecondary}>
               <FileText className="mr-2 h-4 w-4" /> DOC
-            </button>
-            <button onClick={handleDownloadPdf} disabled={isGeneratingPdf}
-              className={`${btnBase} text-white`} style={{ background: 'var(--brand-gold-gradient)', opacity: isGeneratingPdf ? 0.6 : 1 }}>
-              <Download className="mr-2 h-4 w-4" /> {isGeneratingPdf ? 'Generating...' : 'PDF'}
             </button>
             {answerKeys.length > 0 && answerKeys[activeSet] && (
               <>
-                <button onClick={handleDownloadAnswerKey}
-                  className={`${btnBase} bg-emerald-600 text-white hover:bg-emerald-700`}>
+                <button onClick={handleDownloadAnswerKey} className={btnSecondary}>
                   <BookOpen className="mr-2 h-4 w-4" /> Answer Key
                 </button>
                 <button onClick={handleDownloadAnswerKeyPdf} disabled={isGeneratingPdf}
-                  className={`${btnBase} bg-emerald-700 text-white hover:bg-emerald-800`}
-                  style={{ opacity: isGeneratingPdf ? 0.6 : 1 }}>
-                  <BookOpen className="mr-2 h-4 w-4" /> AK PDF
+                  className={`${btnSecondary} disabled:opacity-50`}>
+                  <BookOpen className="mr-2 h-4 w-4" /> Key PDF
                 </button>
               </>
             )}
+
+            {/* Primary export */}
+            <button onClick={handleDownloadPdf} disabled={isGeneratingPdf}
+              className={`${btnBase} bg-brand-gold text-white hover:bg-brand-gold-light disabled:opacity-60`}>
+              <Download className="mr-2 h-4 w-4" /> {isGeneratingPdf ? 'Generating...' : 'Download PDF'}
+            </button>
           </div>
         </div>
       </div>

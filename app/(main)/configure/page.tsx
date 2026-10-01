@@ -23,10 +23,12 @@ const PRESET_PATTERNS: { id: string; label: string; description: string }[] = [
   { id: 'Revision-80', label: 'Revision (80m)', description: '80-mark test' },
 ];
 
-const SECTION_COLORS = ['#d4af37', '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899'];
+// Restrained, on-brand tonal palette (amber accent + neutral slate) — cohesive
+// and distinguishable without the rainbow. Used for section/type charts & legends.
+const SECTION_COLORS = ['#d97706', '#475569', '#f59e0b', '#64748b', '#b45309', '#94a3b8', '#fbbf24', '#334155'];
 const TYPE_COLORS: Record<string, string> = {
-  mcq: '#3b82f6', sa1: '#10b981', sa2: '#8b5cf6', la: '#f59e0b',
-  numerical: '#06b6d4', case_study: '#ec4899', assertion_reason: '#ef4444',
+  mcq: '#d97706', sa1: '#64748b', sa2: '#f59e0b', la: '#475569',
+  numerical: '#fbbf24', case_study: '#94a3b8', assertion_reason: '#b45309',
 };
 
 const SESSION_KEY = 'intellogy_configure_draft';
@@ -618,7 +620,7 @@ function ConfigureForm() {
                   <div key={level} className="text-center">
                     <label className="block text-xs font-semibold mb-2 capitalize text-brand-muted">{level}</label>
                     <input type="range" min={0} max={100} value={diffDist[level]} onChange={e => handleDiffChange(level, parseInt(e.target.value))} className="w-full accent-brand-gold" />
-                    <span className={`text-sm font-bold ${level === 'easy' ? 'text-green-500' : level === 'medium' ? 'text-blue-500' : 'text-red-500'}`}>{diffDist[level]}%</span>
+                    <span className={`text-sm font-bold ${level === 'easy' ? 'text-emerald-600 dark:text-emerald-400' : level === 'medium' ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}`}>{diffDist[level]}%</span>
                   </div>
                 ))}
               </div>
@@ -629,19 +631,19 @@ function ConfigureForm() {
               <h3 className={headCls}><Database className="w-3.5 h-3.5 mr-2 text-brand-gold" /> Question Source Mix</h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-semibold text-brand-muted">
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500" /> Question Bank</span>
-                  <span className="flex items-center gap-1.5">AI Generated <span className="w-2 h-2 rounded-full bg-gray-400" /></span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-brand-gold" /> Question Bank</span>
+                  <span className="flex items-center gap-1.5">AI Generated <span className="w-2 h-2 rounded-full bg-foreground-soft" /></span>
                 </div>
                 <input type="range" min={0} max={100} step={5} value={sourceMix.questionBank}
                   onChange={e => handleSourceChange(parseInt(e.target.value))}
                   className="w-full accent-brand-gold" />
                 <div className="flex justify-between text-sm font-bold">
-                  <span className="text-blue-500">{sourceMix.questionBank}% DB</span>
-                  <span className="text-gray-500">{sourceMix.ai}% AI</span>
+                  <span className="text-brand-gold">{sourceMix.questionBank}% DB</span>
+                  <span className="text-foreground-muted">{sourceMix.ai}% AI</span>
                 </div>
-                <div className="w-full h-3 rounded-full overflow-hidden flex bg-gray-200">
-                  <div className="h-full bg-blue-500 transition-all duration-200" style={{ width: `${sourceMix.questionBank}%` }} />
-                  <div className="h-full bg-gray-400 transition-all duration-200" style={{ width: `${sourceMix.ai}%` }} />
+                <div className="w-full h-3 rounded-full overflow-hidden flex bg-surface-2">
+                  <div className="h-full bg-brand-gold transition-all duration-200" style={{ width: `${sourceMix.questionBank}%` }} />
+                  <div className="h-full bg-foreground-soft transition-all duration-200" style={{ width: `${sourceMix.ai}%` }} />
                 </div>
                 <p className="text-[10px] text-brand-muted">
                   {sourceMix.questionBank > 0
@@ -740,9 +742,9 @@ function ConfigureForm() {
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { label: 'Total Marks', value: totalMarks, color: 'text-brand-gold' },
-                    { label: 'Questions', value: totalQuestions, color: 'text-blue-500' },
-                    { label: 'Sections', value: customSections.length, color: 'text-purple-500' },
-                    { label: 'Est. Duration', value: `${Math.round(totalMarks * 1.2)}m`, color: 'text-green-500' },
+                    { label: 'Questions', value: totalQuestions, color: 'text-foreground' },
+                    { label: 'Sections', value: customSections.length, color: 'text-foreground' },
+                    { label: 'Est. Duration', value: `${Math.round(totalMarks * 1.2)}m`, color: 'text-foreground' },
                   ].map(stat => (
                     <div key={stat.label} className="text-center p-3 rounded-xl bg-brand-card border border-brand-border/40">
                       <div className={`text-xl font-extrabold ${stat.color}`}>{stat.value}</div>
@@ -818,20 +820,20 @@ function ConfigureForm() {
                 <div className="rounded-xl border border-brand-border bg-brand-card p-3">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-2">Difficulty Mix</div>
                   <div className="w-full h-5 rounded-lg overflow-hidden flex">
-                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.easy}%`, backgroundColor: '#22c55e', minWidth: diffDist.easy > 0 ? '16px' : '0' }}>
+                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.easy}%`, backgroundColor: '#10b981', minWidth: diffDist.easy > 0 ? '16px' : '0' }}>
                       {diffDist.easy >= 18 && `${diffDist.easy}%`}
                     </div>
-                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.medium}%`, backgroundColor: '#3b82f6', minWidth: diffDist.medium > 0 ? '16px' : '0' }}>
+                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.medium}%`, backgroundColor: '#f59e0b', minWidth: diffDist.medium > 0 ? '16px' : '0' }}>
                       {diffDist.medium >= 18 && `${diffDist.medium}%`}
                     </div>
-                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.hard}%`, backgroundColor: '#ef4444', minWidth: diffDist.hard > 0 ? '16px' : '0' }}>
+                    <div className="h-full flex items-center justify-center text-[9px] font-bold text-white" style={{ width: `${diffDist.hard}%`, backgroundColor: '#f43f5e', minWidth: diffDist.hard > 0 ? '16px' : '0' }}>
                       {diffDist.hard >= 18 && `${diffDist.hard}%`}
                     </div>
                   </div>
                   <div className="flex justify-between mt-1.5 text-[9px] font-semibold">
-                    <span className="text-green-500">Easy ~{Math.round(totalQuestions * diffDist.easy / 100)}Q</span>
-                    <span className="text-blue-500">Med ~{Math.round(totalQuestions * diffDist.medium / 100)}Q</span>
-                    <span className="text-red-500">Hard ~{Math.round(totalQuestions * diffDist.hard / 100)}Q</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">Easy ~{Math.round(totalQuestions * diffDist.easy / 100)}Q</span>
+                    <span className="text-amber-600 dark:text-amber-400">Med ~{Math.round(totalQuestions * diffDist.medium / 100)}Q</span>
+                    <span className="text-rose-600 dark:text-rose-400">Hard ~{Math.round(totalQuestions * diffDist.hard / 100)}Q</span>
                   </div>
                 </div>
               </div>
@@ -919,9 +921,9 @@ function ConfigureForm() {
               <div className="grid grid-cols-4 gap-2">
                 {[
                   { label: 'Marks', value: totalMarks, color: 'text-brand-gold' },
-                  { label: 'Questions', value: totalQuestions, color: 'text-blue-500' },
-                  { label: 'Sections', value: customSections.length, color: 'text-purple-500' },
-                  { label: 'Duration', value: `${Math.round(totalMarks * 1.2)}m`, color: 'text-green-500' },
+                  { label: 'Questions', value: totalQuestions, color: 'text-foreground' },
+                  { label: 'Sections', value: customSections.length, color: 'text-foreground' },
+                  { label: 'Duration', value: `${Math.round(totalMarks * 1.2)}m`, color: 'text-foreground' },
                 ].map(s => (
                   <div key={s.label} className="text-center p-2 rounded-lg bg-background/60">
                     <div className={`text-base font-extrabold ${s.color}`}>{s.value}</div>
