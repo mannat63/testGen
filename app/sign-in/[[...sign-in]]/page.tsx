@@ -1,4 +1,6 @@
 import { SignIn } from '@clerk/nextjs';
+import Link from 'next/link';
+import { DEMO_ADMIN_ENABLED } from '@/lib/demoAdmin';
 
 export default function SignInPage() {
   return (
@@ -56,6 +58,14 @@ export default function SignInPage() {
               },
             }}
           />
+
+          {DEMO_ADMIN_ENABLED && (
+            <div className="mt-6 text-center">
+              <Link href="/admin-login" className="text-sm font-semibold text-[#c19b28] hover:underline">
+                Admin demo login (username / password)
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </div>

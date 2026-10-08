@@ -1,11 +1,17 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { DEMO_ADMIN_ENABLED, DEMO_ADMIN_COOKIE, DEMO_ADMIN_TOKEN } from '@/lib/demoAdmin';
 
-const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)', '/unauthorized']);
+const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)', '/unauthorized', '/admin-login(.*)']);
 
 export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
+  if (isPublicRoute(request)) return;
+
+  // Temporary demo admin bypass (admin/admin) — see lib/demoAdmin.ts
+  if (DEMO_ADMIN_ENABLED && request.cookies.get(DEMO_ADMIN_COOKIE)?.value === DEMO_ADMIN_TOKEN) {
+    return;
   }
+
+  await auth.protect();
 });
 
 export const config = {

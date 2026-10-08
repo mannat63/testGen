@@ -1,6 +1,8 @@
 import { currentUser } from '@clerk/nextjs/server';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getAllowedUserModel } from '@/models/AllowedUser';
+import { DEMO_ADMIN_ENABLED, DEMO_ADMIN_COOKIE, DEMO_ADMIN_TOKEN } from '@/lib/demoAdmin';
 import { getTemplateModel } from '@/models/Template';
 import { getGenerationLogModel } from '@/models/GenerationLog';
 import { addAllowedUser, removeAllowedUser, createTemplate, deleteTemplate } from './actions';
@@ -157,9 +159,15 @@ const BOARD_COLORS: Record<string, string> = { JEE: '#f97316', CBSE: '#fb923c', 
 
 /* ── Page ── */
 export default async function AdminPage() {
-  const user = await currentUser();
-  const primaryEmail = user?.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress;
-  if (primaryEmail?.toLowerCase() !== 'teamintellogy@gmail.com') redirect('/');
+  // Temporary demo admin bypass (admin/admin) — see lib/demoAdmin.ts
+  const demoAdmin = DEMO_ADMIN_ENABLED &&
+    (await cookies()).get(DEMO_ADMIN_COOKIE)?.value === DEMO_ADMIN_TOKEN;
+
+  if (!demoAdmin) {
+    const user = await currentUser();
+    const primaryEmail = user?.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress;
+    if (primaryEmail?.toLowerCase() !== 'teamintellogy@gmail.com') redirect('/');
+  }
 
   const AllowedUser = await getAllowedUserModel();
   const users = await AllowedUser.find({}).sort({ addedAt: -1 }).lean();
