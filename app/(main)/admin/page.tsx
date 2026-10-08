@@ -3,12 +3,14 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getAllowedUserModel } from '@/models/AllowedUser';
 import { DEMO_ADMIN_ENABLED, DEMO_ADMIN_COOKIE, DEMO_ADMIN_TOKEN } from '@/lib/demoAdmin';
+import { demoAdminLogout } from '@/app/admin-login/actions';
 import { getTemplateModel } from '@/models/Template';
 import { getGenerationLogModel } from '@/models/GenerationLog';
 import { addAllowedUser, removeAllowedUser, createTemplate, deleteTemplate } from './actions';
 import { BOARDS } from '@/config/boards';
 import Link from 'next/link';
 import Image from 'next/image';
+import { LogOut } from 'lucide-react';
 import TeacherCarousel from './TeacherCarousel';
 import { DonutChart, RadialGauge, BarSparkline, StackedBar, MiniStat } from './AdminCharts';
 
@@ -266,10 +268,19 @@ export default async function AdminPage() {
             </span>
           </Link>
           <span className="hidden sm:inline text-[10px] text-admin-accent font-bold tracking-wider uppercase border border-admin-accent/30 bg-admin-accent/10 rounded-full px-3 py-1">
-            Admin
+            Admin{demoAdmin ? ' · Demo' : ''}
           </span>
         </div>
-        <Link href="/" className="text-xs text-admin-muted hover:text-admin-accent transition-colors font-semibold">&larr; Dashboard</Link>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-xs text-admin-muted hover:text-admin-accent transition-colors font-semibold">&larr; Dashboard</Link>
+          {demoAdmin && (
+            <form action={demoAdminLogout}>
+              <button type="submit" className="flex items-center gap-1.5 text-xs font-semibold text-admin-muted hover:text-admin-accent transition-colors border border-admin-border hover:border-admin-accent/40 rounded-lg px-3 py-1.5">
+                <LogOut className="w-3.5 h-3.5" /> Log out
+              </button>
+            </form>
+          )}
+        </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-6 space-y-8">
