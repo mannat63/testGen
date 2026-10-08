@@ -1,7 +1,10 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { DEMO_ADMIN_ENABLED, DEMO_ADMIN_COOKIE, DEMO_ADMIN_TOKEN } from '@/lib/demoAdmin';
 
-const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)', '/unauthorized', '/admin-login(.*)']);
+const isPublicRoute = createRouteMatcher([
+  '/sign-in(.*)', '/sign-up(.*)', '/unauthorized',
+  '/admin-login(.*)', '/api/admin-login(.*)', '/api/admin-logout(.*)',
+]);
 
 export default clerkMiddleware(async (auth, request) => {
   if (isPublicRoute(request)) return;

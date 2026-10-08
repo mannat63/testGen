@@ -3,7 +3,6 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getAllowedUserModel } from '@/models/AllowedUser';
 import { DEMO_ADMIN_ENABLED, DEMO_ADMIN_COOKIE, DEMO_ADMIN_TOKEN } from '@/lib/demoAdmin';
-import { demoAdminLogout } from '@/app/admin-login/actions';
 import { getTemplateModel } from '@/models/Template';
 import { getGenerationLogModel } from '@/models/GenerationLog';
 import { addAllowedUser, removeAllowedUser, createTemplate, deleteTemplate } from './actions';
@@ -274,7 +273,7 @@ export default async function AdminPage() {
         <div className="flex items-center gap-4">
           <Link href="/" className="text-xs text-admin-muted hover:text-admin-accent transition-colors font-semibold">&larr; Dashboard</Link>
           {demoAdmin && (
-            <form action={demoAdminLogout}>
+            <form method="POST" action="/api/admin-logout">
               <button type="submit" className="flex items-center gap-1.5 text-xs font-semibold text-admin-muted hover:text-admin-accent transition-colors border border-admin-border hover:border-admin-accent/40 rounded-lg px-3 py-1.5">
                 <LogOut className="w-3.5 h-3.5" /> Log out
               </button>
